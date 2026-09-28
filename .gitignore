@@ -1,0 +1,12 @@
+# Raw and derived data are not tracked (size and data-licence restrictions)
+data/raw/*
+!data/raw/.gitkeep
+output/
+legacy/data/
+legacy/results/
+legacy/figures/
+*.rds
+*.RData
+.Rhistory
+.Rproj.user/
+.DS_Store

@@ -1,0 +1,170 @@
+# =============================================================================
+# Roles in international mobility networks — pipeline configuration
+# -----------------------------------------------------------------------------
+# Everything that is a *choice* lives here, so the R code never has to be
+# edited to (a) add a new migration dataset, (b) change a methodological
+# setting, or (c) swap in a newer driver file.
+#
+# Paths are relative to the folder that contains this file. Raw data go in
+# data/raw/ (not tracked by git; see README for download sources).
+# =============================================================================
+
+output_dir: output
+seed: 123
+
+# Reference table of country names -> ISO3. Every dataset that only has names
+# (SPEI, UCDP-GED) is matched through this file. Add a row to fix a mismatch.
+country_crosswalk: data_ref/country_name_crosswalk.csv
+country_list: data_ref/country_list.csv          # Abel & Cohen reference list (name, iso3c, region)
+
+# Historical / split entities used by some flow datasets. Driver data for the
+# listed modern ISO3 code are copied onto the historical code.
+iso3_successors:
+  SUD: SDN   # "Sudan*" (pre-2011, incl. South Sudan) in Abel & Cohen
+  SCG: SRB   # Serbia & Montenegro in Abel & Cohen
+  DFR: DEU   # EM-DAT "Germany Fed Rep"
+
+# -----------------------------------------------------------------------------
+# 1. MOBILITY FLOW DATASETS
+#    Each entry describes one origin-destination flow table. To add a dataset,
+#    copy a block and change the column mapping. Two layouts are supported:
+#      format: long  -> one row per origin, destination, period
+#      format: wide  -> one row per origin, destination; one column per period
+#    Period semantics:
+#      period_length: number of years a flow record covers
+#      period_anchor: "start" if the period column is the first year of the
+#                     interval (Abel: year0 = 1990 means mid-1990..mid-1995),
+#                     "end" if it is the last/only year (UNHCR annual).
+#    The pipeline labels every period by its END year and aggregates driver
+#    data over the years (end - length + 1) .. end.
+# -----------------------------------------------------------------------------
+flows:
+
+  undesa:
+    label: "International migrants (Abel & Cohen 2022, UN DESA stocks)"
+    file: data/raw/bilat_mig.csv
+    format: long
+    origin: orig
+    destination: dest
+    period: year0
+    value: da_pb_closed          # demographic accounting, pseudo-Bayesian, closed
+    period_length: 5
+    period_anchor: start
+    roles:                       # dataset-specific overrides of the roles block
+      # With a single >=1 tie threshold nearly every country both sends and
+      # receives, so strict regular equivalence puts all countries in ONE role.
+      # Magnitude thresholds make REGE match ties of similar size.
+      thresholds: [1, 1000, 10000, 100000]
+      k: auto
+
+  unhcr:
+    label: "Refugee arrivals (UNHCR forced displacement flow data)"
+    file: data/raw/UNHCR_Flow_Data_REF.csv
+    format: wide
+    origin: orig.iso3
+    destination: dest.iso3
+    value_prefix: "refflows."    # columns refflows.1990 ... refflows.2020
+    period_length: 1
+    period_anchor: end
+
+  # Example template for a new dataset (uncomment and edit):
+  # idmc_cross_border:
+  #   label: "My new flow dataset"
+  #   file: data/raw/my_flows.csv
+  #   format: long
+  #   origin: origin_iso3
+  #   destination: destination_iso3
+  #   period: year
+  #   value: people
+  #   period_length: 1
+  #   period_anchor: end
+
+# Which datasets to run (names from the list above)
+run: [undesa, unhcr]
+
+# -----------------------------------------------------------------------------
+# 2. ROLE DETECTION (regular equivalence + clustering)
+# -----------------------------------------------------------------------------
+roles:
+  # method: "binary" = REGE on 0/1 ties (one relation per threshold below)
+  #         "valued" = White's REGGE on the flow values themselves (src/rege_valued.cpp;
+  #                    needs Rcpp + compiler; ~4 min per run for 1,400 nodes)
+  method: binary
+  value_transform: log1p      # valued only: log1p or none (raw flows)
+  no_self_match: false        # valued only: optional variant, standard REGGE = false
+  # A tie exists when flow >= threshold. Give several values to use a
+  # "multi-threshold" REGE in which ties of different magnitude must be matched
+  # separately (a simple way to bring flow size into regular equivalence).
+  # The original analysis used a single threshold of 1 person.
+  thresholds: [1]
+  rege_iterations: 3          # UCINET / blockmodeling default
+
+  # How to cluster the REGE output:
+  #   "rege_distance"   -> hierarchical clustering directly on 1 - REGE similarity
+  #                        (what the manuscript describes)
+  #   "legacy_profiles" -> Euclidean distance between rows of the 1 - REGE matrix,
+  #                        Ward.D2 linkage (what the original FINAL_* scripts
+  #                        actually did; see legacy/README.md)
+  cluster_on: rege_distance
+  linkage: average
+  k: 3                        # integer, or "auto" (maximise average silhouette)
+  k_range: [2, 12]            # range scanned for diagnostics / "auto"
+
+# -----------------------------------------------------------------------------
+# 3. DRIVER (COVARIATE) DATA
+#    Each loader returns a country-year panel. Aggregation rules say how
+#    annual values are collapsed into a flow period (e.g., 5-year windows).
+# -----------------------------------------------------------------------------
+drivers:
+  population:
+    file: data/raw/WPP2022_Demographic_Indicators_Medium.csv
+  gdp:
+    file: data/raw/GDP_Global_1990_2021.csv     # World Bank WDI NY.GDP.PCAP.CD
+  spei:
+    files:
+      spei_max:     data/raw/spei01-annual-max.csv
+      spei_min:     data/raw/spei01-annual-min.csv
+      spei_mean:    data/raw/spei01-annual-mean.csv
+      spei_max_cv:  data/raw/spei01-annual-max-cv.csv
+      spei_min_cv:  data/raw/spei01-annual-min-cv.csv
+      spei_mean_cv: data/raw/spei01-annual-mean-cv.csv
+  conflict:
+    file: data/raw/GEDEvent_v22_1.csv           # UCDP GED
+  disasters:
+    file: data/raw/emdat_public_1990-2020.xlsx  # EM-DAT public export
+    skip_rows: 6
+    types: [Drought, Flood, Storm, Landslide, Wildfire, Extreme temperature]
+
+  # How annual values become period values
+  aggregation:
+    gdp_pc: mean
+    spei_max: max
+    spei_min: min
+    spei_mean: mean
+    spei_max_cv: max
+    spei_min_cv: min
+    spei_mean_cv: mean
+    default: sum               # conflict and disaster counts/deaths/affected
+
+  # Variables (regular expressions) divided by population
+  per_capita: ["^conflict_deaths$", "_deaths$", "_affected$"]
+
+  # Absence from UCDP / EM-DAT means "no event": fill with 0 (as the manuscript
+  # states). The original scripts did NOT do this, which silently dropped all
+  # conflict-free / disaster-free country-periods from the models.
+  zero_fill: ["^conflict_", "_deaths$", "_affected$"]
+
+# -----------------------------------------------------------------------------
+# 4. MODELS
+# -----------------------------------------------------------------------------
+models:
+  covariates: [gdp_pc, spei_min, spei_mean, spei_mean_cv,
+               conflict_events, conflict_deaths,
+               drought_affected, drought_deaths, flood_affected, flood_deaths,
+               storm_affected, storm_deaths, landslide_affected, landslide_deaths]
+  log_transform: ["^gdp_pc$", "^conflict_", "_deaths$", "_affected$"]   # log1p before scaling
+  scale: true                 # z-score covariates (odds ratio per 1 SD)
+  time_effect: factor         # none | linear | factor (period fixed effects)
+  lag_periods: 0              # 1 = drivers from the previous period
+  binary_engine: glmer        # glmer (lme4, Laplace) | mblogit (mclogit, PQL; original)
+  multinomial: true           # also fit one baseline-category logit over all roles
