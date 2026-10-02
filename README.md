@@ -89,9 +89,10 @@ Results go to `output/<dataset>/` (not tracked):
 | 4. Role models | `R/models.R` | `binary_role_models.csv`, `multinomial_role_model.csv`, `covariate_missingness.csv` |
 | 5. Figures | `R/figures.R` | `figures/*.png` |
 
-To compare with the original role assignments, place the original
-`UNDESA_full_roles_k3.csv` and `UNHCR_full_roles_k3.csv` in `legacy/results/`
-and run `Rscript validate_against_original.R`.
+To compare with the original role assignments, run
+`Rscript validate_against_original.R`. It reads the original outputs in
+`legacy/results/` (`UNDESA_full_roles_k3.csv`, `UNHCR_full_roles_k3.csv`;
+role labels only, as produced by the legacy scripts).
 
 ## Adding a new migration dataset
 

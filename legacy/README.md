@@ -21,7 +21,8 @@ reproducibility.
   `leifeld/tnam`), `readxl`, `tidyverse`, `texreg` and `matrixStats`.
 * The role-assessment scripts write `results/UNDESA_full_roles_k3.csv` and
   `results/UNHCR_full_roles_k3.csv`, which the model scripts and
-  `../validate_against_original.R` read.
+  `../validate_against_original.R` read. The original copies of both files
+  (UNHCR version dated 27 Jan 2025) are included in `results/`.
 
 ## Known issues
 

@@ -3,7 +3,8 @@ data/raw/*
 !data/raw/.gitkeep
 output/
 legacy/data/
-legacy/results/
+legacy/results/*
+!legacy/results/*_full_roles_k3.csv
 legacy/figures/
 *.rds
 *.RData
