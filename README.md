@@ -155,7 +155,9 @@ loader in `R/drivers.R` that returns `iso3, year, <variables>`, add it to
 authors. They expect their own working directory with `data/` and `results/`
 folders; see `legacy/README.md`. `for_colleagues/FIXED_role_assessment_section.R`
 is a corrected replacement for the role-assessment block of those scripts, with
-every line commented.
+every line commented. `for_colleagues/run_fixed_and_compare.R` runs that section
+(binary and valued ties, both datasets) and compares the result with the
+original roles in `legacy/results/`; it needs the `blockmodeling` package.
 
 ## License
 

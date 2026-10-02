@@ -33,12 +33,14 @@ REGE_ITER   <- 3                                   # REGE iterations; state this
 LINK        <- "average"                           # linkage method the manuscript reports
 K_RANGE     <- 2:25                                # k values scanned (say "2-25" in the paper, not "2 to n-1")
 K_FINAL     <- 3                                   # final k; set ONLY after inspecting the diagnostics below
+RESULTS_DIR <- "results"                           # where outputs are written (as in the original scripts)
+OUT_TAG     <- ""                                  # added to file names; "" keeps the original names
 
 # ---- 1. Build the stacked country-period network -----------------------------
 a <- na.omit(edges.mig[edges.mig[, 3] >= MIN_FLOW, ])  # keep dyads with at least MIN_FLOW migrants; drop NAs
 colnames(a)[3] <- "weight"                         # third column = flow size; igraph reads it as edge weight
-a <- a[sub("\\.\\d{4}$", "", a$from) !=            # drop self-loops (origin = destination),
-       sub("\\.\\d{4}$", "", a$to), ]              #   which REGE should never see
+a <- a[sub("\\.\\d{4}$", "", a[[1]]) !=           # drop self-loops (origin = destination; columns 1-2
+       sub("\\.\\d{4}$", "", a[[2]]), ]            #   are "Country.Year"), which REGE should never see
 g <- graph_from_data_frame(a, directed = TRUE)     # directed graph; node names are "Country.Year"
 g <- igraph::delete_vertices(g,                    # remove isolated nodes (no ties at all);
        V(g)[igraph::degree(g) == 0])               #   same step as the original a4
@@ -60,11 +62,12 @@ diag(M) <- 0                                       # no self-ties (a country-yea
 # choice) is a variant that rescales ties by each node's row/column totals; with
 # 0/1 input that rescaling is essentially a degree comparison, which is why the
 # original migrant roles are predicted ~98% by degree alone.
-rege_out <- if (USE_WEIGHTS) {
-  REGE.for(M, E = 1, it = REGE_ITER)               # valued REGGE, fixed number of iterations
-} else {
-  REGE.nm.for(M, E = 1, it = REGE_ITER)            # original function, kept for comparison
-}
+rege_fun  <- if (USE_WEIGHTS) REGE.for else REGE.nm.for  # valued REGGE, or the original function for comparison
+iter_name <- intersect(c("iter", "it"),            # name of the iterations argument differs between
+                       names(formals(rege_fun)))[1] #   blockmodeling versions; find the one this version uses
+rege_args <- list(M = M, E = 1)                    # network matrix and starting similarity (all 1s)
+if (!is.na(iter_name)) rege_args[[iter_name]] <- REGE_ITER  # fixed number of iterations, if settable
+rege_out  <- do.call(rege_fun, rege_args)          # run REGE
 S <- rege_out$E                                    # REGE similarity matrix, 0 (different) .. 1 (equivalent)
 dimnames(S) <- dimnames(M)                         # keep "Country.Year" labels on rows and columns
 a9 <- 1 - S                                        # dissimilarity = 1 - similarity (same as original a9)
@@ -93,7 +96,7 @@ diag_k <- do.call(rbind, lapply(K_RANGE, function(k) {  # one row of diagnostics
              smallest_cluster = min(table(cl)))    # flags "clusters" of 1-2 nodes (outliers, not roles)
 }))
 print(diag_k)                                      # inspect: silhouette peak, WCSS elbow, cluster sizes
-write.csv(diag_k, paste0("results/", DATASET, "_k_diagnostics.csv"),
+write.csv(diag_k, file.path(RESULTS_DIR, paste0(DATASET, OUT_TAG, "_k_diagnostics.csv")),
           row.names = FALSE)                       # keep the table for the Supplement
 
 par(mfrow = c(2, 1))                               # two stacked panels
@@ -117,5 +120,6 @@ print(aggregate(degree ~ role, deg_tab,            # min / median / max degree p
                 function(x) c(min = min(x), median = median(x), max = max(x))))
 # If the degree ranges barely overlap across roles, the roles are degree classes.
 
-write.csv(c, paste0("results/", DATASET, "_full_roles_k", K_FINAL, ".csv"))  # same file pattern as before
-clusters <- read.csv(paste0("results/", DATASET, "_full_roles_k", K_FINAL, ".csv"))[, 2:3]  # used by Network Metrics
+roles_file <- file.path(RESULTS_DIR, paste0(DATASET, OUT_TAG, "_full_roles_k", K_FINAL, ".csv"))  # same name pattern as before
+write.csv(c, roles_file)                           # save role assignments
+clusters <- read.csv(roles_file)[, 2:3]            # used by the Network Metrics section
