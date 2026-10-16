@@ -1,10 +1,12 @@
 # =============================================================================
 # run_fixed_and_compare.R
 #
-# Runs FIXED_role_assessment_section.R on the migrant (UNDESA) and refugee
-# (UNHCR) networks, with binary ties (original setup) and with valued ties,
-# and compares each result with the original role assignments in
-# legacy/results/. Nothing in legacy/results/ is overwritten.
+# Step 1: re-runs the ORIGINAL role method and checks that it reproduces the
+#         saved roles in legacy/results/ (adjusted Rand should be 1.0).
+# Step 2: runs FIXED_role_assessment_section.R on the migrant (UNDESA) and
+#         refugee (UNHCR) networks, with binary and with valued ties, and
+#         compares each result with the original roles.
+# Nothing in legacy/results/ is overwritten.
 #
 # Run from the repository root:   Rscript for_colleagues/run_fixed_and_compare.R
 # Needs the raw data in data/raw/ (see README) and these packages:
@@ -71,11 +73,38 @@ run_fixed <- function(dataset, edges, use_weights) {
   env$c                                            # role assignments: id, role
 }
 
-# ---- Compare with the original roles ------------------------------------------
+# ---- Step 1: reproduce the ORIGINAL method exactly ----------------------------
+# Same steps as FINAL_*_role_assessment.R lines 61-134: 0/1 ties, REGE.nm.for
+# with default settings, then what hcut(x = a9, method = "average") actually
+# did: Euclidean distances between rows of 1 - REGE, Ward.D2 linkage, k = 3.
+# If this matches the saved roles (adjusted Rand = 1), the data and setup are
+# the same as the original run, and any difference in step 2 comes from the fixes.
+run_original <- function(edges) {
+  a  <- na.omit(edges[edges[, 3] >= 1, ])          # ties with at least 1 person (original cutoff)
+  g  <- graph_from_data_frame(a)                   # directed graph of "Country.Year" nodes
+  A  <- as.matrix(as_adjacency_matrix(g, sparse = FALSE))  # unweighted adjacency, as in the original
+  A[A > 0] <- 1                                    # 0/1 ties
+  a9 <- 1 - REGE.nm.for(A, E = 1)$E                # original REGE call, default iterations
+  dimnames(a9) <- dimnames(A)
+  b  <- cutree(hclust(dist(a9), method = "ward.D2"), k = 3)  # what hcut() actually computed
+  data.frame(id = names(b), role = b)
+}
+
+# ---- Step 2: run the FIXED section and compare with the original roles --------
 results <- list()
 for (dataset in c("UNDESA", "UNHCR")) {
   edges    <- if (dataset == "UNDESA") edges.mig else edges.ref.long
   original <- read.csv(file.path("legacy/results", paste0(dataset, "_full_roles_k3.csv")))[, c("id", "role")]
+
+  cat("\n================", dataset, "original method (reproduction check) ================\n")
+  rep <- run_original(edges)
+  m   <- merge(original, rep, by = "id", suffixes = c("_original", "_rerun"))
+  print(table(original = m$role_original, rerun = m$role_rerun))
+  results[[length(results) + 1]] <- data.frame(
+    dataset = dataset, ties = "original method (reproduction)",
+    n_matched = nrow(m), adjusted_rand_vs_original = round(ari(m$role_original, m$role_rerun), 3),
+    role_sizes = paste(table(rep$role), collapse = "/"))
+
   for (w in c(FALSE, TRUE)) {
     cat("\n================", dataset, if (w) "valued REGE (REGE.for)" else "binary REGE (REGE.nm.for)", "================\n")
     new <- run_fixed(dataset, edges, w)
@@ -85,7 +114,7 @@ for (dataset in c("UNDESA", "UNHCR")) {
     results[[length(results) + 1]] <- data.frame(
       dataset = dataset, ties = if (w) "valued" else "binary",
       n_matched = nrow(m), adjusted_rand_vs_original = round(ari(m$role_original, m$role_fixed), 3),
-      fixed_role_sizes = paste(table(new$role), collapse = "/"))
+      role_sizes = paste(table(new$role), collapse = "/"))
   }
 }
 comparison <- do.call(rbind, results)
