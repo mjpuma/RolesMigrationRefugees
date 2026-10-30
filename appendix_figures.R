@@ -20,6 +20,32 @@ cfg <- read_config("config.yml")
 pal <- function(k) role_palette(k)
 theme_set(theme_minimal(11) + theme(legend.position = "bottom", plot.title.position = "plot"))
 
+# Node shape in diagram D: an ellipse whose aspect ratio is the country's
+# in-degree / out-degree ratio (number of origin vs destination countries).
+# Area is kept equal to a circle of the same size, so size still = volume.
+#   circle      in-degree = out-degree
+#   wide        more countries send to it than it sends to (in > out)
+#   tall        it sends to more countries than send to it  (out > in)
+# shape_gamma exaggerates (>1) or damps (<1) the effect; the ratio is capped at
+# shape_cap (pure senders/receivers in the refugee data have ratio 0 or Inf).
+shape_gamma <- 1
+shape_cap   <- 4
+add_shape("ellipse", clip = shape_noclip,
+  plot = function(coords, v = NULL, params) {
+    col <- params("vertex", "color"); size <- params("vertex", "size") / 200
+    asp <- params("vertex", "size2")
+    if (!is.null(v)) { col <- col[v]; if (length(size) > 1) size <- size[v]; asp <- asp[v] }
+    n <- nrow(coords); col <- rep_len(col, n); size <- rep_len(size, n); asp <- rep_len(asp, n)
+    t <- seq(0, 2 * pi, length.out = 49)
+    for (i in seq_len(n)) polygon(coords[i, 1] + size[i] * sqrt(asp[i]) * cos(t),
+                                  coords[i, 2] + size[i] / sqrt(asp[i]) * sin(t),
+                                  col = col[i], border = NA)
+  })
+degree_aspect <- function(indeg, outdeg) {
+  r <- (indeg + 1e-9) / (outdeg + 1e-9)
+  pmin(pmax(r, 1 / shape_cap), shape_cap)^shape_gamma
+}
+
 network_year <- c(undesa = 2020, unhcr = 2015)   # year shown in diagram D
 top_edges    <- c(undesa = 100,  unhcr = 150)    # strongest flows drawn in D
 
@@ -49,21 +75,43 @@ for (ds in cfg$run) {
     guides(colour = guide_legend(ncol = 2, override.aes = list(size = 3, alpha = 1)))
   ggsave(file.path(outdir, "A_separation_scatter.png"), pA, width = 8, height = 7, dpi = 200, bg = "white")
 
-  # ---- B. REGE space (classical MDS of 1 - REGE) ---------------------------------
+  # ---- B. REGE space: nonmetric MDS (main) and classical MDS (comparison) -------
+  # Classical (Torgerson) MDS reproduces the distances themselves as closely as
+  # possible; nonmetric MDS (Kruskal 1964) reproduces only their rank order, which
+  # suits REGE scores, whose scale has no metric meaning. Fit: Kruskal stress-1.
   sim <- readRDS(out_path(cfg, ds, "rege_similarity.rds"))$similarity
-  mds <- cmdscale(as.dist(1 - sim), k = 2, eig = TRUE)
+  D <- 1 - sim
+  mds <- cmdscale(as.dist(D), k = 2, eig = TRUE)
   share <- round(100 * mds$eig[1:2] / sum(pmax(mds$eig, 0)), 1)
-  B <- tibble(node = rownames(sim), d1 = mds$points[, 1], d2 = mds$points[, 2]) |>
+  # isoMDS cannot take zero distances between different points (identical REGE
+  # profiles): give them a tiny positive value; the rank order is unchanged
+  Dn <- D; off <- row(Dn) != col(Dn)
+  Dn[off & Dn <= 0] <- min(Dn[off & Dn > 0]) / 10
+  nm_fit <- MASS::isoMDS(as.dist(Dn), y = mds$points, k = 2, maxit = 200, trace = FALSE)
+  mk_B <- function(pts) tibble(node = rownames(sim), d1 = pts[, 1], d2 = pts[, 2]) |>
     separate(node, c("iso3", "period"), sep = "_", convert = TRUE) |>
-    left_join(roles |> select(iso3, period, role_lab, name), by = c("iso3", "period"))
-  pB <- ggplot(B, aes(d1, d2, colour = role_lab)) +
-    geom_point(alpha = 0.6, size = 1.6, position = position_jitter(width = 0.002, height = 0.002, seed = 1)) +
-    scale_colour_manual(values = cols) +
-    labs(title = paste0(title_ds, ": countries in regular-equivalence space"),
-         subtitle = sprintf("Classical MDS of 1 - REGE similarity (dimension 1: %.1f%%, dimension 2: %.1f%% of variation).\nClose points = similar roles.", share[1], share[2]),
-         x = "MDS dimension 1", y = "MDS dimension 2", colour = "Role") +
-    guides(colour = guide_legend(ncol = 2, override.aes = list(size = 3, alpha = 1)))
-  ggsave(file.path(outdir, "B_rege_space.png"), pB, width = 8, height = 7, dpi = 200, bg = "white")
+    left_join(roles |> select(iso3, period, role_lab, name, in_strength, out_strength),
+              by = c("iso3", "period"))
+  plot_B <- function(B, subtitle, file) {
+    lab <- B |> filter(period == max(period)) |> group_by(role_lab) |>
+      slice_max(in_strength + out_strength, n = 3, with_ties = FALSE) |> ungroup()
+    p <- ggplot(B, aes(d1, d2, colour = role_lab)) +
+      geom_point(alpha = 0.6, size = 1.6, position = position_jitter(width = 0.002, height = 0.002, seed = 1)) +
+      geom_text_repel(data = lab, aes(label = paste(name, period)), size = 2.5,
+                      show.legend = FALSE, max.overlaps = 30, min.segment.length = 0) +
+      scale_colour_manual(values = cols) +
+      labs(title = paste0(title_ds, ": countries in regular-equivalence space"),
+           subtitle = subtitle, x = "Dimension 1", y = "Dimension 2", colour = "Role") +
+      guides(colour = guide_legend(ncol = 2, override.aes = list(size = 3, alpha = 1)))
+    ggsave(file.path(outdir, file), p, width = 8, height = 7, dpi = 200, bg = "white")
+  }
+  plot_B(mk_B(nm_fit$points),
+         sprintf("Nonmetric MDS (Kruskal) of 1 - REGE similarity; stress-1 = %.3f.\nClose points = similar roles. Labels: 3 largest countries per role, last period.",
+                 nm_fit$stress / 100), "B_rege_space.png")
+  plot_B(mk_B(mds$points),
+         sprintf("Classical (Torgerson) MDS of 1 - REGE similarity (dimension 1: %.1f%%, dimension 2: %.1f%% of variation).\nClose points = similar roles.", share[1], share[2]),
+         "B_rege_space_classical.png")
+  msg("  nonmetric MDS stress-1 = ", round(nm_fit$stress / 100, 3))
 
   # ---- C. role-level network (blockmodel image) ---------------------------------
   rl <- roles |> select(iso3, period, role, role_lab)
@@ -131,7 +179,9 @@ for (ds in cfg$run) {
   set.seed(3)
   lay <- layout_with_fr(gy, weights = log10(E(gy)$flow))
   plot(gy, layout = lay,
+       vertex.shape = "ellipse",
        vertex.size = 1.5 + 7 * sqrt(strength_tot / max(strength_tot, na.rm = TRUE)),
+       vertex.size2 = degree_aspect(vr$in_degree, vr$out_degree),
        vertex.color = cols[as.character(vr$role_lab)], vertex.frame.color = NA,
        vertex.label = ifelse(top_lab, vr$name, NA), vertex.label.cex = 0.6,
        vertex.label.color = "black", vertex.label.dist = 0.6,
@@ -144,10 +194,20 @@ for (ds in cfg$run) {
         else sprintf("%s: main flows in %d", title_ds, yr), cex.main = 1)
   present <- names(cols)[names(cols) %in% as.character(vr$role_lab)]
   legend("bottomleft", legend = present, fill = cols[present], border = NA, bty = "n", cex = 0.7)
+  # shape key (top right): three example ellipses
+  usr <- par("usr"); kx <- usr[2] - 0.32 * diff(usr[1:2]); ky <- usr[4] - 0.05 * diff(usr[3:4])
+  tt <- seq(0, 2 * pi, length.out = 49); s0 <- 0.035
+  for (j in 1:3) {
+    a <- c(1 / 2.5, 1, 2.5)[j]
+    polygon(kx + (j - 1) * 0.1 + s0 * sqrt(a) * cos(tt), ky + s0 / sqrt(a) * sin(tt), col = "grey55", border = NA)
+  }
+  text(kx + c(0, 0.1, 0.2), ky - 0.075, c("out > in", "in = out", "in > out"), cex = 0.6)
+  text(kx + 0.1, ky + 0.07, "Shape: in-degree / out-degree", cex = 0.65, font = 2)
   mtext(paste(if (shows_all) sprintf("Edges: all %d flows recorded in %d.", n_all, yr)
               else sprintf("Edges: each country's 2 largest outflows plus the %d largest flows overall (%d of %d flows).", top_edges[[ds]], nrow(fy), n_all),
-              "Node colour = role; size = total in + out flow; labels = 20 largest countries + 3 largest per role."),
-        side = 1, line = -0.5, cex = 0.65)
+              "Node colour = role; size = total in + out flow.",
+              sprintf("\nShape = in-degree / out-degree (all flows that year; capped at %g); labels = 20 largest countries + 3 largest per role.", shape_cap)),
+        side = 1, line = -0.2, cex = 0.62)
   dev.off()
 }
 msg("Done: output/<dataset>/figures/appendix/")

@@ -90,22 +90,27 @@ role_profile <- function(roles_df) {
   roles_df |>
     group_by(role) |>
     summarise(n = n(),
+              # medians first: across() below replaces the columns by their means
+              median_net_flow = median(net_flow),
+              share_net_receiving = mean(net_flow > 0),
+              median_volume = median(in_strength + out_strength),
               across(c(in_degree, out_degree, in_strength, out_strength, betweenness),
                      \(x) mean(x, na.rm = TRUE)),
               share_pure_sender = mean(pure_sender),
               share_pure_receiver = mean(pure_receiver),
-              median_net_flow = median(net_flow),
               .groups = "drop")
 }
 
-# Automatic, human-readable role labels from the profile (edit freely)
+# Automatic, human-readable role labels from the profile (edit freely).
+# Volume level = the role's median total flow (in + out) on fixed decade
+# cut-offs; balance = share of the role's country-periods with inflow > outflow
+# (a role is called net receiving/sending only if >= 2/3 of its members are).
 label_roles <- function(profile) {
-  total <- profile$in_strength + profile$out_strength
-  two_way <- profile$share_pure_sender <= 0.9 & profile$share_pure_receiver <= 0.9
-  lvl <- rep(NA_character_, nrow(profile))
-  r <- rank(total[two_way], ties.method = "first")
-  lvl[two_way] <- c("low", "medium", "high")[ceiling(3 * r / length(r))]
-  balance <- ifelse(profile$median_net_flow > 0, "net receiving", "net sending")
+  lvl <- as.character(cut(profile$median_volume, c(-Inf, 1e4, 1e5, 1e6, Inf),
+                          labels = c("low", "medium", "high", "very high")))
+  balance <- case_when(profile$share_net_receiving >= 2/3 ~ "net receiving",
+                       profile$share_net_receiving <= 1/3 ~ "net sending",
+                       TRUE ~ sprintf("mixed (%.0f%% net receiving)", 100 * profile$share_net_receiving))
   profile |>
     mutate(label = case_when(
       share_pure_sender > 0.9 ~ "sender only",
