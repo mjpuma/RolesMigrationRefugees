@@ -53,6 +53,22 @@ read_flows <- function(cfg, dataset) {
            !is.na(flow)) |>
     select(origin, destination, period, window_start, window_end, flow)
 
+  # optional net-flow network (net: true): for each pair of countries keep one
+  # directed link, from the net sender to the net receiver, with the net flow
+  # (A->B minus B->A). Gross estimation methods that differ mainly in the
+  # size of counter-flows (e.g. Abel & Cohen closed demographic accounting,
+  # pseudo-Bayesian vs minimisation) give almost identical net flows.
+  if (isTRUE(spec$net)) {
+    df <- df |>
+      mutate(a = pmin(origin, destination), b = pmax(origin, destination),
+             signed = if_else(origin == a, flow, -flow)) |>
+      group_by(a, b, period, window_start, window_end) |>
+      summarise(net = sum(signed), .groups = "drop") |>
+      filter(net != 0) |>
+      transmute(origin = if_else(net > 0, a, b), destination = if_else(net > 0, b, a),
+                period, window_start, window_end, flow = abs(net))
+  }
+
   msg("  ", dataset, ": ", nrow(df), " dyad-periods, periods ",
       paste(sort(unique(df$period)), collapse = ", "))
   df

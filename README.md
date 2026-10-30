@@ -24,6 +24,8 @@ run_pipeline.R                 runs every step for every dataset listed in confi
 validate_against_original.R    compares new role assignments with the original ones
 appendix_figures.R             network diagrams and role-separation plots
 data_prep/get_unhcr_flows.R    downloads the current UNHCR flow data
+analysis/migrant_volume_robustness.R  migrant groups under other cut-offs, thresholds, Abel & Cohen methods
+analysis/migrant_net_roles.R   regular-equivalence roles on net migrant flows (net, backbone, valued)
 R/
   utils.R                      helpers (config, paths, country-name matching, adjusted Rand index)
   flows.R                      reads any origin-destination flow table into one standard format
@@ -146,6 +148,7 @@ flows:
     period: year
     value: people             # or several columns, summed: [refugees, asylum_seekers]
     years: [2000, 2024]       # optional: keep only these years
+    net: false                # optional: true = one link per pair, net sender -> net receiver
     period_length: 1          # years covered by one record
     period_anchor: end        # "start" if the year is the first year of the interval
     roles:                    # optional per-dataset overrides of the roles settings
