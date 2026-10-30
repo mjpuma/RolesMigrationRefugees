@@ -22,6 +22,8 @@ contains:
 config.yml                     all settings: datasets, REGE, clustering, drivers, models
 run_pipeline.R                 runs every step for every dataset listed in config.yml
 validate_against_original.R    compares new role assignments with the original ones
+appendix_figures.R             network diagrams and role-separation plots
+data_prep/get_unhcr_flows.R    downloads the current UNHCR flow data
 R/
   utils.R                      helpers (config, paths, country-name matching, adjusted Rand index)
   flows.R                      reads any origin-destination flow table into one standard format
@@ -65,6 +67,40 @@ using the file names in `config.yml`:
 | `spei01-annual-{min,max,mean}{,-cv}.csv` | SPEIbase v2.9 (Beguería et al.), SPEI-01 aggregated to country-year annual min / max / mean and their coefficients of variation |
 | `GEDEvent_v22_1.csv` | UCDP Georeferenced Event Dataset v22.1, [ucdp.uu.se/downloads](https://ucdp.uu.se/downloads/) |
 | `emdat_public_1990-2020.xlsx` | EM-DAT public export 1990–2020, [emdat.be](https://www.emdat.be/) |
+| `unhcr_flows_latest.csv` | Current UNHCR forced-displacement flow data, written by `data_prep/get_unhcr_flows.R` (see below) |
+
+### Current UNHCR flow data
+
+`UNHCR_Flow_Data_REF.csv` is an older extract (refugee arrivals, 1990–2020).
+To use UNHCR's current release, run once from the repository root:
+
+```sh
+Rscript data_prep/get_unhcr_flows.R
+```
+
+This installs or updates UNHCR's `refugees` R package (from UNHCR's
+R-universe, which is newer than CRAN), takes its `flows` table (one row per
+origin × asylum country × year), drops rows without a valid ISO3 code on both
+sides (unknown origin, stateless), and writes `data/raw/unhcr_flows_latest.csv`
+plus a `_README.txt` recording the package version, download date and the
+years covered by each column:
+
+| Column | New arrivals / applications |
+|---|---|
+| `refugees` | refugee arrivals (group-recognised and temporary protection; what the original analysis used) |
+| `asylum_seekers` | new individual asylum applications (broad coverage from 2000) |
+| `oip` | other people in need of international protection (from 2018) |
+| `returned_refugees` | refugee returns to the country of origin (not used by default) |
+
+Two datasets in `config.yml` read this file:
+
+- `unhcr_latest`: refugee arrivals only, all years in the release (same definition as `unhcr`, newer data).
+- `unhcr_displacement`: refugee arrivals + asylum applications + OIP, summed, from 2000.
+
+Add them to `run:` to include them. The driver files listed above end in
+2020–2021, so later flow years have missing drivers and are left out of the
+models (the run prints which drivers end early) until those files are
+updated. Roles are still computed for every year.
 
 `data_ref/country_list.csv` is the Abel & Cohen country reference list.
 `data_ref/country_name_crosswalk.csv` maps country-name spellings used by the
@@ -108,7 +144,8 @@ flows:
     origin: origin_iso3       # column names in your file (ISO3 codes)
     destination: dest_iso3
     period: year
-    value: people
+    value: people             # or several columns, summed: [refugees, asylum_seekers]
+    years: [2000, 2024]       # optional: keep only these years
     period_length: 1          # years covered by one record
     period_anchor: end        # "start" if the year is the first year of the interval
     roles:                    # optional per-dataset overrides of the roles settings

@@ -67,6 +67,36 @@ flows:
     period_length: 1
     period_anchor: end
 
+  # --- UNHCR current release (download first: Rscript data_prep/get_unhcr_flows.R) ---
+  # Refugee arrivals only: same definition as `unhcr` above, but the latest
+  # UNHCR release and all available years.
+  unhcr_latest:
+    label: "Refugee arrivals (UNHCR flow data, current release)"
+    file: data/raw/unhcr_flows_latest.csv
+    format: long
+    origin: coo_iso
+    destination: coa_iso
+    period: year
+    value: refugees
+    years: [1990, 2100]          # upper bound = whatever the release contains
+    period_length: 1
+    period_anchor: end
+
+  # Broader forced displacement: refugee arrivals + new individual asylum
+  # applications (+ other people in need of international protection from 2018).
+  # Starts in 2000 because asylum coverage is limited to a few countries before.
+  unhcr_displacement:
+    label: "Refugee arrivals + asylum applications (UNHCR flow data, current release)"
+    file: data/raw/unhcr_flows_latest.csv
+    format: long
+    origin: coo_iso
+    destination: coa_iso
+    period: year
+    value: [refugees, asylum_seekers, oip]
+    years: [2000, 2100]
+    period_length: 1
+    period_anchor: end
+
   # Example template for a new dataset (uncomment and edit):
   # idmc_cross_border:
   #   label: "My new flow dataset"
@@ -79,7 +109,9 @@ flows:
   #   period_length: 1
   #   period_anchor: end
 
-# Which datasets to run (names from the list above)
+# Which datasets to run (names from the list above). After downloading the
+# current UNHCR data, add unhcr_latest and/or unhcr_displacement, e.g.
+#   run: [undesa, unhcr, unhcr_latest, unhcr_displacement]
 run: [undesa, unhcr]
 
 # -----------------------------------------------------------------------------

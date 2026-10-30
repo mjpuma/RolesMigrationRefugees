@@ -92,9 +92,27 @@ aggregate_drivers <- function(cfg, panel, flows) {
   windows <- flows |> distinct(period, window_start, window_end)
   vars <- setdiff(names(panel), c("iso3", "year", "pop"))
 
-  # zero-fill: no record in UCDP / EM-DAT = no event
+  # zero-fill: no record in UCDP / EM-DAT = no event, but ONLY within the years
+  # the source covers. Beyond its last year (e.g. 2021+ when the file ends in
+  # 2020) values stay missing, so they are not mistaken for "no events".
   zf <- vars[matches_any(vars, unlist(dcfg$zero_fill))]
-  panel <- panel |> mutate(across(all_of(zf), \(x) coalesce(x, 0)))
+  for (v in zf) {
+    yrs <- panel$year[!is.na(panel[[v]])]
+    if (!length(yrs)) next
+    inside <- panel$year >= min(yrs) & panel$year <= max(yrs)
+    panel[[v]][inside & is.na(panel[[v]])] <- 0
+  }
+  # report driver coverage so gaps with the flow years are visible
+  cover <- vapply(vars, function(v) {
+    y <- panel$year[!is.na(panel[[v]])]
+    if (length(y)) paste0(min(y), "-", max(y)) else "none"
+  }, character(1))
+  flow_years <- range(windows$window_start, windows$window_end)
+  late <- names(cover)[vapply(vars, function(v) {
+    y <- panel$year[!is.na(panel[[v]])]; length(y) && max(y) < flow_years[2] }, logical(1))]
+  if (length(late)) msg("  note: flows run to ", flow_years[2], " but these drivers end earlier: ",
+                        paste(sprintf("%s (%s)", late, cover[late]), collapse = ", "),
+                        " -> later periods have missing drivers and drop out of the models")
 
   long <- windows |>
     rowwise() |>

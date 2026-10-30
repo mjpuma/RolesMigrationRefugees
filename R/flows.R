@@ -14,11 +14,18 @@ read_flows <- function(cfg, dataset) {
   raw <- read_csv(in_root(cfg, spec$file), show_col_types = FALSE, guess_max = 1e5)
 
   if (spec$format == "long") {
+    # `value` can name one column or several; several are summed
+    # (e.g. refugee arrivals + asylum applications). A row counts as missing
+    # only if all of the named columns are missing.
+    vcols <- unlist(spec$value)
+    vals  <- as.data.frame(lapply(raw[vcols], as.numeric))
+    total <- rowSums(vals, na.rm = TRUE)
+    total[rowSums(!is.na(vals)) == 0] <- NA
     df <- raw |>
       transmute(origin      = .data[[spec$origin]],
                 destination = .data[[spec$destination]],
                 year        = as.integer(.data[[spec$period]]),
-                flow        = as.numeric(.data[[spec$value]]))
+                flow        = total)
   } else if (spec$format == "wide") {
     value_cols <- names(raw)[startsWith(names(raw), spec$value_prefix)]
     df <- raw |>
@@ -29,6 +36,12 @@ read_flows <- function(cfg, dataset) {
              flow = as.numeric(flow))
   } else {
     stop("format must be 'long' or 'wide'")
+  }
+
+  # optional year range, e.g. years: [2000, 2024]
+  if (!is.null(spec$years)) {
+    yr <- unlist(spec$years)
+    df <- df |> filter(year >= yr[1], year <= yr[2])
   }
 
   L <- spec$period_length
