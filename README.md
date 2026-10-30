@@ -26,6 +26,8 @@ appendix_figures.R             network diagrams and role-separation plots
 data_prep/get_unhcr_flows.R    downloads the current UNHCR flow data
 analysis/migrant_volume_robustness.R  migrant groups under other cut-offs, thresholds, Abel & Cohen methods
 analysis/migrant_net_roles.R   regular-equivalence roles on net migrant flows (net, backbone, valued)
+analysis/migrant_backbone.R    backbone roles: sensitivity to share and method; driver models
+analysis/refugee_role_changes.R  drivers of year-to-year changes of refugee role
 R/
   utils.R                      helpers (config, paths, country-name matching, adjusted Rand index)
   flows.R                      reads any origin-destination flow table into one standard format
