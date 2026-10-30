@@ -138,10 +138,15 @@ for (ds in cfg$run) {
        edge.width = 0.3 + 3 * (log10(E(gy)$flow) - min(log10(E(gy)$flow))) /
                     diff(range(log10(E(gy)$flow))),
        edge.arrow.size = 0.15, edge.color = adjustcolor("grey40", 0.35), edge.curved = 0.15)
-  title(sprintf("%s: main flows in %d", title_ds, yr), cex.main = 1)
+  n_all <- sum(flows$period == yr)
+  shows_all <- nrow(fy) == n_all
+  title(if (shows_all) sprintf("%s: all %d flows recorded in %d", title_ds, n_all, yr)
+        else sprintf("%s: main flows in %d", title_ds, yr), cex.main = 1)
   present <- names(cols)[names(cols) %in% as.character(vr$role_lab)]
   legend("bottomleft", legend = present, fill = cols[present], border = NA, bty = "n", cex = 0.7)
-  mtext(sprintf("Edges: each country's 2 largest outflows plus the %d largest flows overall. Node colour = role; size = total in + out flow; labels = 20 largest countries + 3 largest per role.", top_edges[[ds]]),
+  mtext(paste(if (shows_all) sprintf("Edges: all %d flows recorded in %d.", n_all, yr)
+              else sprintf("Edges: each country's 2 largest outflows plus the %d largest flows overall (%d of %d flows).", top_edges[[ds]], nrow(fy), n_all),
+              "Node colour = role; size = total in + out flow; labels = 20 largest countries + 3 largest per role."),
         side = 1, line = -0.5, cex = 0.65)
   dev.off()
 }
