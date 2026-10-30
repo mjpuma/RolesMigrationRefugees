@@ -52,8 +52,16 @@ load_conflict <- function(cfg, xw) {
 
 load_disasters <- function(cfg) {
   dc <- cfg$drivers$disasters
-  readxl::read_xlsx(in_root(cfg, dc$file), skip = dc$skip_rows %||% 0,
-                    .name_repair = "minimal") |>
+  f <- in_root(cfg, dc$file)
+  csv <- sub("\\.xlsx?$", ".csv", f)
+  raw <- if (file.exists(csv)) {
+    # a CSV export of the same sheet (header row first) avoids needing readxl
+    read_csv(csv, show_col_types = FALSE, guess_max = 1e5)
+  } else {
+    readxl::read_xlsx(f, skip = dc$skip_rows %||% 0, .name_repair = "minimal")
+  }
+  raw |>
+    mutate(`Disaster Type` = str_trim(`Disaster Type`)) |>   # EM-DAT has "Extreme temperature " with a trailing space
     filter(`Disaster Type` %in% dc$types) |>
     transmute(iso3 = ISO, year = as.integer(Year),
               type = str_replace_all(tolower(`Disaster Type`), " ", "_"),
