@@ -19,15 +19,21 @@ contains:
 ## Repository layout
 
 ```
-config.yml                     all settings: datasets, REGE, clustering, drivers, models
+config.yml                     all settings: datasets, REGE, clustering, drivers, models (main analysis)
+config_*.yml                   variants: original SPEI-01 drivers, Jordan's SPEI-48 file, interim drought,
+                               main specification without conflict controls (see data_prep/SPEI_README.md)
 run_pipeline.R                 runs every step for every dataset listed in config.yml
 validate_against_original.R    compares new role assignments with the original ones
 appendix_figures.R             network diagrams and role-separation plots
 data_prep/get_unhcr_flows.R    downloads the current UNHCR flow data
+data_prep/build_spei_country.R country-year drought indicators from gridded SPEIbase (area-weighted)
+data_prep/SPEI_README.md       drought specification: rationale, timescales, results of each variant
 analysis/migrant_volume_robustness.R  migrant groups under other cut-offs, thresholds, Abel & Cohen methods
 analysis/migrant_net_roles.R   regular-equivalence roles on net migrant flows (net, backbone, valued)
 analysis/migrant_backbone.R    backbone roles: sensitivity to share and method; driver models
 analysis/refugee_role_changes.R  drivers of year-to-year changes of refugee role
+analysis/manuscript_figures.R  manuscript Figures 1-4 and SI figures (output/manuscript/)
+analysis/spei_size_check.R     shows that minimum-over-grid drought indices scale with country size
 R/
   utils.R                      helpers (config, paths, country-name matching, adjusted Rand index)
   flows.R                      reads any origin-destination flow table into one standard format
@@ -71,6 +77,10 @@ using the file names in `config.yml`:
 | `spei01-annual-{min,max,mean}{,-cv}.csv` | SPEIbase v2.9 (Beguería et al.), SPEI-01 aggregated to country-year annual min / max / mean and their coefficients of variation |
 | `GEDEvent_v22_1.csv` | UCDP Georeferenced Event Dataset v22.1, [ucdp.uu.se/downloads](https://ucdp.uu.se/downloads/) |
 | `emdat_public_1990-2020.xlsx` | EM-DAT public export 1990–2020, [emdat.be](https://www.emdat.be/) |
+| `spei12.nc`, `spei48.nc` | SPEIbase v2.9 gridded SPEI, 0.5°, [spei.csic.es/spei_database_2_9](https://spei.csic.es/spei_database_2_9) (`nc/spei12.nc`, `nc/spei48.nc`) |
+| `ne_10m_admin_0_countries/` | Natural Earth 1:10m admin-0 countries (unzipped), [naturalearthdata.com](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/) |
+| `new_gdp_percapita_rows.csv` | GDP per capita for five territories missing from WDI (Anguilla, British Virgin Islands, Cook Islands, Montserrat, Palestine); fills gaps only |
+| `spei_country_year.csv` | written by `data_prep/build_spei_country.R` (see below) |
 | `unhcr_flows_latest.csv` | Current UNHCR forced-displacement flow data, written by `data_prep/get_unhcr_flows.R` (see below) |
 
 ### Current UNHCR flow data
@@ -113,10 +123,15 @@ unmatched during a run.
 
 ## Running
 
-From the repository root:
+From the repository root, build the drought indicators once (about 20 s), then
+run the pipeline and the analyses. Every script takes an optional config file:
 
-```r
-source("run_pipeline.R")                 # or: Rscript run_pipeline.R [config.yml]
+```sh
+Rscript data_prep/build_spei_country.R           # -> data/raw/spei_country_year.csv
+Rscript run_pipeline.R [config.yml]
+Rscript analysis/migrant_backbone.R [config.yml]
+Rscript analysis/refugee_role_changes.R [config.yml]
+Rscript analysis/manuscript_figures.R [config.yml]
 ```
 
 Results go to `output/<dataset>/` (not tracked):

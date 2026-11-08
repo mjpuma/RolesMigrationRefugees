@@ -26,7 +26,8 @@ suppressPackageStartupMessages({
   library(dplyr); library(tidyr); library(purrr); library(readr); library(ggplot2)
 })
 for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
-cfg <- read_config("config.yml")
+cfg_file <- commandArgs(trailingOnly = TRUE)   # optional: Rscript <script> my_config.yml
+cfg <- read_config(if (length(cfg_file)) cfg_file[1] else "config.yml")
 ds <- "undesa"
 outdir <- dirname(out_path(cfg, ds, "robustness", "x"))
 rc <- modifyList(cfg$roles, cfg$flows[[ds]]$roles)
