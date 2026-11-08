@@ -11,3 +11,7 @@ legacy/figures/
 .Rhistory
 .Rproj.user/
 .DS_Store
+
+# Variant outputs and collaborator data drops
+output_*/
+fromJordan/

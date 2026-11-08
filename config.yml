@@ -1,3 +1,8 @@
+# MAIN CONFIGURATION (since 7 Nov 2026): drought from area-weighted SPEI-12 / SPEI-48,
+# matched to each dataset's timescale, with drought x income (aspirations/capabilities).
+# Before the first run:  Rscript data_prep/build_spei_country.R   (see data_prep/SPEI_README.md)
+# Alternatives: config_original_spei01.yml, config_spei_jordan.yml, config_drought_interim.yml,
+#               config_nocontrols_conflict.yml (total drought effect, no conflict controls)
 # =============================================================================
 # Roles in international mobility networks — pipeline configuration
 # -----------------------------------------------------------------------------
@@ -66,6 +71,13 @@ flows:
     value_prefix: "refflows."    # columns refflows.1990 ... refflows.2020
     period_length: 1
     period_anchor: end
+    models:                    # refugees (annual): drought this year and last year
+      covariates: [gdp_pc, drought12_ext,
+                   conflict_events, conflict_deaths,
+                   drought_affected, drought_deaths, flood_affected, flood_deaths,
+                   storm_affected, storm_deaths, landslide_affected, landslide_deaths]
+      lags: [drought12_ext]
+      interactions: [[drought12_ext, gdp_pc], [drought12_ext_lag1, gdp_pc]]
 
   # --- UNHCR current release (download first: Rscript data_prep/get_unhcr_flows.R) ---
   # Refugee arrivals only: same definition as `unhcr` above, but the latest
@@ -152,6 +164,10 @@ drivers:
     file: data/raw/WPP2022_Demographic_Indicators_Medium.csv
   gdp:
     file: data/raw/GDP_Global_1990_2021.csv     # World Bank WDI NY.GDP.PCAP.CD
+    # Territories missing from WDI (from Jordan, 6 Nov 2026; French overseas-department rows
+    # removed: they are total GDP in million EUR, not per-capita US$). Fills gaps only.
+    supplement: data/raw/new_gdp_percapita_rows.csv
+    supplement_encoding: latin1
   spei:
     files:
       spei_max:     data/raw/spei01-annual-max.csv
@@ -160,6 +176,9 @@ drivers:
       spei_max_cv:  data/raw/spei01-annual-max-cv.csv
       spei_min_cv:  data/raw/spei01-annual-min-cv.csv
       spei_mean_cv: data/raw/spei01-annual-mean-cv.csv
+  # Country-year drought indicators from data_prep/build_spei_country.R (area-weighted)
+  climate:
+    file: data/raw/spei_country_year.csv
   conflict:
     file: data/raw/GEDEvent_v22_1.csv           # UCDP GED
   disasters:
@@ -176,6 +195,10 @@ drivers:
     spei_max_cv: max
     spei_min_cv: min
     spei_mean_cv: mean
+    drought12_ext: mean      # 5-year periods: average share of area in drought (cumulative exposure)
+    drought12_severe: mean
+    spei12_dec: mean
+    spei48_dec: first        # 5-year periods: 4-year water balance at the start (antecedent conditions)
     default: sum               # conflict and disaster counts/deaths/affected
 
   # Variables (regular expressions) divided by population
@@ -190,10 +213,13 @@ drivers:
 # 4. MODELS
 # -----------------------------------------------------------------------------
 models:
-  covariates: [gdp_pc, spei_min, spei_mean, spei_mean_cv,
+  # Migrants (5-year periods): cumulative drought exposure within the period and the
+  # multi-year deficit going into it; their effect allowed to depend on income.
+  covariates: [gdp_pc, drought12_ext, spei48_dec,
                conflict_events, conflict_deaths,
                drought_affected, drought_deaths, flood_affected, flood_deaths,
                storm_affected, storm_deaths, landslide_affected, landslide_deaths]
+  interactions: [[drought12_ext, gdp_pc]]
   log_transform: ["^gdp_pc$", "^conflict_", "_deaths$", "_affected$"]   # log1p before scaling
   scale: true                 # z-score covariates (odds ratio per 1 SD)
   time_effect: factor         # none | linear | factor (period fixed effects)

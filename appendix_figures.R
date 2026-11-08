@@ -15,7 +15,8 @@ suppressPackageStartupMessages({
   library(igraph); library(ggrepel)
 })
 for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
-cfg <- read_config("config.yml")
+cfg_file <- commandArgs(trailingOnly = TRUE)   # optional: Rscript <script> my_config.yml
+cfg <- read_config(if (length(cfg_file)) cfg_file[1] else "config.yml")
 
 pal <- function(k) role_palette(k)
 theme_set(theme_minimal(11) + theme(legend.position = "bottom", plot.title.position = "plot"))

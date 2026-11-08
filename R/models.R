@@ -24,6 +24,17 @@ prepare_model_data <- function(cfg, roles, drivers) {
       mutate(across(all_of(covs), \(x) lag(x, mc$lag_periods))) |> ungroup()
   }
 
+  # Lagged copies of selected drivers: value in the previous period of the same
+  # country (consecutive periods only), named <var>_lag1
+  lag_vars <- unlist(mc$lags)
+  if (length(lag_vars)) {
+    step <- min(diff(sort(unique(drv$period))))
+    drv <- drv |> arrange(iso3, period) |> group_by(iso3) |>
+      mutate(across(all_of(lag_vars), \(x) ifelse(period - lag(period) == step, lag(x), NA),
+                    .names = "{.col}_lag1")) |> ungroup()
+    covs <- c(covs, paste0(lag_vars, "_lag1"))
+  }
+
   d <- roles |>
     select(iso3, country, region, period, role, label) |>
     left_join(drv |> select(iso3, period, all_of(covs)), by = c("iso3", "period"))
@@ -33,7 +44,7 @@ prepare_model_data <- function(cfg, roles, drivers) {
     pivot_longer(everything(), names_to = "covariate", values_to = "n_missing") |>
     mutate(share_missing = n_missing / nrow(d))
 
-  logc <- covs[matches_any(covs, unlist(mc$log_transform))]
+  logc <- covs[matches_any(sub("_lag1$", "", covs), unlist(mc$log_transform))]
   # per-capita rates are expressed per 100,000 people before log1p, so small
   # rates are not squashed to ~0
   pc <- unlist(cfg$drivers$per_capita)
@@ -43,6 +54,13 @@ prepare_model_data <- function(cfg, roles, drivers) {
   n_before <- nrow(d)
   d <- d |> filter(if_all(all_of(covs), \(x) !is.na(x) & is.finite(x)))
   if (isTRUE(mc$scale)) d <- d |> mutate(across(all_of(covs), \(x) as.numeric(scale(x))))
+  # Interactions as products of the (scaled) covariates, named <a>_x_<b>.
+  # With scaled inputs, the main effects are effects at the mean of the other.
+  for (pr in mc$interactions %||% list()) {
+    pr <- unlist(pr); nm <- paste(pr, collapse = "_x_")
+    d[[nm]] <- d[[pr[1]]] * d[[pr[2]]]
+    covs <- c(covs, nm)
+  }
   # drop covariates with no variation (e.g. a disaster type that never occurs)
   keep <- covs[vapply(covs, function(v) sd(d[[v]]) > 0, logical(1))]
 
@@ -117,6 +135,10 @@ fit_multinomial <- function(cfg, md) {
 }
 
 run_models <- function(cfg, dataset, roles, drivers) {
+  # a dataset may override model settings (e.g. lags for annual refugee data)
+  # (top-level replacement, so a dataset list such as interactions replaces the default)
+  ov <- cfg$flows[[dataset]]$models %||% list()
+  cfg$models[names(ov)] <- ov
   md <- prepare_model_data(cfg, roles, drivers)
   msg("  model data: ", nrow(md$data), " country-periods (", md$n_dropped,
       " dropped for missing covariates), ", length(md$covariates), " covariates")

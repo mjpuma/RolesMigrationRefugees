@@ -13,13 +13,32 @@ load_population <- function(cfg) {
     transmute(iso3 = ISO3_code, year = as.integer(Time), pop = TPopulation1July * 1000)
 }
 
-load_gdp <- function(cfg) {
-  read_csv(in_root(cfg, cfg$drivers$gdp$file), show_col_types = FALSE,
-           na = c("..", "", "NA")) |>
+load_gdp <- function(cfg, xw = NULL) {
+  gc <- cfg$drivers$gdp
+  gdp <- read_csv(in_root(cfg, gc$file), show_col_types = FALSE,
+                  na = c("..", "", "NA")) |>
     filter(!is.na(`Country Code`), `Series Code` == "NY.GDP.PCAP.CD") |>
     select(iso3 = `Country Code`, matches("^\\d{4} \\[YR")) |>
     pivot_longer(-iso3, names_to = "year", values_to = "gdp_pc") |>
     mutate(year = as.integer(substr(year, 1, 4)), gdp_pc = as.numeric(gdp_pc))
+  # Optional supplement for territories missing from the World Bank file
+  # (wide: first column = country name, one column per year). It only fills
+  # country-years that the World Bank file leaves empty.
+  if (!is.null(gc$supplement) && !is.null(xw)) {
+    sup <- read_csv(in_root(cfg, gc$supplement), show_col_types = FALSE,
+                    locale = locale(encoding = gc$supplement_encoding %||% "UTF-8")) |>
+      rename(name = 1) |>
+      pivot_longer(-name, names_to = "year", values_to = "gdp_sup") |>
+      mutate(iso3 = name_to_iso3(name, xw, "GDP supplement"), year = as.integer(year),
+             gdp_sup = as.numeric(gdp_sup)) |>
+      filter(!is.na(iso3), !is.na(gdp_sup)) |>
+      select(iso3, year, gdp_sup)
+    gdp <- full_join(gdp, sup, by = c("iso3", "year"))
+    n_fill <- sum(is.na(gdp$gdp_pc) & !is.na(gdp$gdp_sup))
+    gdp <- gdp |> mutate(gdp_pc = coalesce(gdp_pc, gdp_sup)) |> select(-gdp_sup)
+    msg("  GDP supplement filled ", n_fill, " country-years")
+  }
+  gdp
 }
 
 load_spei <- function(cfg, xw) {
@@ -34,7 +53,14 @@ load_spei <- function(cfg, xw) {
       filter(!is.na(iso3)) |>
       # several polygons can map to one ISO3 (e.g. Gaza + West Bank)
       group_by(iso3, year) |>
-      summarise(!!var := fun(value, na.rm = TRUE), .groups = "drop")
+      summarise(!!var := fun(value, na.rm = TRUE), .groups = "drop") |>
+      # optional: standardize within each country (removes level differences,
+      # e.g. minimum-over-grid-cell indices that scale with country area)
+      group_by(iso3) |>
+      mutate(!!var := if (var %in% unlist(cfg$drivers$spei$within_country))
+        (.data[[var]] - mean(.data[[var]], na.rm = TRUE)) / sd(.data[[var]], na.rm = TRUE)
+        else .data[[var]]) |>
+      ungroup()
   }) |>
     reduce(full_join, by = c("iso3", "year"))
 }
@@ -73,12 +99,21 @@ load_disasters <- function(cfg) {
                 names_glue = "{type}_{.value}", values_fill = 0)
 }
 
+# Country-year climate indicators already keyed on ISO3 (long format: iso3, year, ...),
+# e.g. data/raw/spei_country_year.csv from data_prep/build_spei_country.R
+load_climate <- function(cfg) {
+  f <- cfg$drivers$climate$file
+  if (is.null(f)) return(NULL)
+  read_csv(in_root(cfg, f), show_col_types = FALSE) |> mutate(year = as.integer(year))
+}
+
 # Annual country panel with every driver
 build_driver_panel <- function(cfg) {
   xw <- load_crosswalk(cfg)
   msg("Loading driver data ...")
-  panel <- list(load_population(cfg), load_gdp(cfg), load_spei(cfg, xw),
-                load_conflict(cfg, xw), load_disasters(cfg)) |>
+  panel <- list(load_population(cfg), load_gdp(cfg, xw), load_spei(cfg, xw),
+                load_conflict(cfg, xw), load_disasters(cfg), load_climate(cfg)) |>
+    compact() |>
     reduce(full_join, by = c("iso3", "year")) |>
     add_successor_rows(cfg)
   msg("  driver panel: ", n_distinct(panel$iso3), " countries x ",
@@ -118,12 +153,15 @@ aggregate_drivers <- function(cfg, panel, flows) {
     rowwise() |>
     mutate(year = list(seq(window_start, window_end))) |>
     unnest(year) |>
-    inner_join(panel, by = "year", relationship = "many-to-many")
+    inner_join(panel, by = "year", relationship = "many-to-many") |>
+    arrange(iso3, period, year)
 
   agg_one <- function(x, rule) {
     if (all(is.na(x))) return(NA_real_)
     switch(rule, mean = mean(x, na.rm = TRUE), max = max(x, na.rm = TRUE),
-           min = min(x, na.rm = TRUE), sum = sum(x, na.rm = TRUE))
+           min = min(x, na.rm = TRUE), sum = sum(x, na.rm = TRUE),
+           last = dplyr::last(x[!is.na(x)]),     # value in the final year of the period
+           first = dplyr::first(x[!is.na(x)]))
   }
   rule_for <- function(v) dcfg$aggregation[[v]] %||% dcfg$aggregation$default
 
