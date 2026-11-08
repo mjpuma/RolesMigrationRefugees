@@ -30,12 +30,14 @@ cfg_file <- commandArgs(trailingOnly = TRUE)   # optional: Rscript <script> my_c
 cfg <- read_config(if (length(cfg_file)) cfg_file[1] else "config.yml")
 ds <- "undesa"
 outdir <- dirname(out_path(cfg, ds, "robustness", "x"))
+# roles settings incl. the migrant-specific tie thresholds from the config
 rc <- modifyList(cfg$roles, cfg$flows[[ds]]$roles)
-base_thr <- unlist(rc$thresholds)
+base_thr <- unlist(rc$thresholds)        # main-analysis thresholds (people)
 
 flows <- read_flows(cfg, ds)
 cl_list <- read_csv(in_root(cfg, cfg$country_list), show_col_types = FALSE) |>
   select(iso3 = iso3c, country = name)
+# one row per country-period: degrees, strengths and total volume (in + out)
 nm <- node_metrics(flows, 1) |>
   mutate(volume = in_strength + out_strength, node = node_id(iso3, period)) |>
   left_join(cl_list, by = "iso3")
@@ -48,18 +50,24 @@ run_rege <- function(fl, thr, k_fixed = NULL) {
   cl <- cluster_roles(1 - sim, rr)
   cl$role[match(nm$node, names(cl$role))]          # aligned with nm rows
 }
+# ARI on the country-periods present in both groupings
 ari <- function(a, b) { ok <- !is.na(a) & !is.na(b); adjusted_rand(a[ok], b[ok]) }
+# share of country-periods given the same group number (meaningful only when
+# group numbers are ordered the same way, as for volume tiers)
 same <- function(a, b) mean(a == b, na.rm = TRUE)
 
 # =============================================================================
 # A. Volume tiers under different cut-off rules (5-year flows, people)
 # =============================================================================
-lv <- log10(nm$volume)
+lv <- log10(nm$volume)            # tiers are cut on log volume
+# natural breaks (Fisher-Jenks: minimises within-tier variance of log volume)
 jenks <- function(k) {
   br <- classInt::classIntervals(lv, k, style = "fisher")$brks
   cut(lv, br, include.lowest = TRUE, labels = FALSE)
 }
+# quantile tiers (equal numbers of country-periods per tier)
 q <- function(k) cut(lv, quantile(lv, seq(0, 1, length.out = k + 1)), include.lowest = TRUE, labels = FALSE)
+# fixed cut-offs in people, e.g. c(1e4, 1e5, 1e6) -> 4 tiers
 fixed <- function(b) cut(nm$volume, c(0, b, Inf), labels = FALSE)
 
 tiers <- tibble(
@@ -73,6 +81,7 @@ tiers <- tibble(
   `natural breaks, 3`            = jenks(3),
   `natural breaks, 4`            = jenks(4)
 )
+# the cut-off values of each rule, for the histogram in R1
 breaks_used <- list(
   `fixed 10k/100k/1M (4 tiers)` = c(1e4, 1e5, 1e6),
   `fixed 30k/300k/3M (4 tiers)` = c(3e4, 3e5, 3e6),
@@ -112,6 +121,8 @@ thr_sets <- list(
   `REGE 1/100/1k/10k/100k`    = c(1, 1e2, 1e3, 1e4, 1e5),
   `REGE 1/3k/30k/300k`        = c(1, 3e3, 3e4, 3e5),
   `REGE 1/1k/10k/100k/1M`     = c(1, 1e3, 1e4, 1e5, 1e6))
+# for each threshold set: roles with k chosen by silhouette and with k = 5
+# (the main-analysis number of migrant roles), aligned with the rows of nm
 roles_auto <- list(); roles_k5 <- list()
 for (nmx in names(thr_sets)) {
   msg("  ", nmx)
@@ -128,11 +139,15 @@ for (nmx in names(thr_sets)) {
 methods <- c(da_min_closed = "demographic accounting, minimisation, closed",
              da_min_open   = "demographic accounting, minimisation, open",
              sd_drop_neg   = "stock differencing, negatives dropped")
+# For each estimation method: decade volume tiers, REGE roles (base
+# thresholds) and the USA / Germany totals used in the SI to show how far the
+# methods differ for large countries.
 est_roles <- list(); est_vol <- list(); usa_deu <- list()
 for (m in c("da_pb_closed", names(methods))) {
   c2 <- cfg; c2$flows[[ds]]$value <- m
   fl <- read_flows(c2, ds)
   e <- fl |> filter(flow >= 1)
+  # total out- and inflow per country-period under this method
   v <- full_join(e |> group_by(iso3 = origin, period) |> summarise(out = sum(flow), .groups = "drop"),
                  e |> group_by(iso3 = destination, period) |> summarise(inn = sum(flow), .groups = "drop"),
                  by = c("iso3", "period")) |>
@@ -151,6 +166,7 @@ write_csv(bind_rows(usa_deu), file.path(outdir, "estimate_methods_usa_deu.csv"))
 # =============================================================================
 # Agreement
 # =============================================================================
+# all groupings in one named list, each a vector aligned with the rows of nm
 groupings <- c(
   as.list(tiers |> select(-node)),
   setNames(roles_auto, paste0(names(roles_auto), ", k auto")),
@@ -158,6 +174,7 @@ groupings <- c(
   setNames(est_vol[names(methods)], paste0("tiers 10k/100k/1M, ", names(methods))),
   setNames(est_roles, paste0("REGE base, ", names(est_roles))))
 G <- names(groupings)
+# ARI between every pair of groupings (symmetric matrix, 1 on the diagonal)
 ARI <- outer(G, G, Vectorize(function(a, b) ari(groupings[[a]], groupings[[b]])))
 dimnames(ARI) <- list(G, G)
 write_csv(as_tibble(ARI, rownames = "grouping"), file.path(outdir, "agreement_ari.csv"))
@@ -177,6 +194,7 @@ print(as.data.frame(runs |> mutate(across(where(is.numeric), \(x) round(x, 2))))
 # =============================================================================
 theme_set(theme_minimal(11) + theme(plot.title.position = "plot", legend.position = "bottom"))
 
+# R1: histogram of volume with each rule's cut-offs
 cuts <- imap_dfr(breaks_used, \(b, n) tibble(rule = n, cut = b))
 pR1 <- ggplot(nm, aes(volume)) +
   geom_histogram(bins = 60, fill = "grey70", colour = "white") +
@@ -188,6 +206,7 @@ pR1 <- ggplot(nm, aes(volume)) +
        x = "People moving in or out (log scale)", y = "Country-periods")
 ggsave(file.path(outdir, "R1_volume_cutoffs.png"), pR1, width = 9, height = 8, dpi = 200, bg = "white")
 
+# R2: heat map of the ARI matrix (subset of groupings)
 show <- c(names(tiers)[-1], paste0(names(thr_sets), ", k auto"),
           paste0("tiers 10k/100k/1M, ", names(methods)), paste0("REGE base, ", names(methods)))
 Al <- as_tibble(ARI[show, show], rownames = "a") |> pivot_longer(-a, names_to = "b", values_to = "ari") |>

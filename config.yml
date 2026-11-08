@@ -1,8 +1,9 @@
 # MAIN CONFIGURATION (since 7 Nov 2026): drought from area-weighted SPEI-12 / SPEI-48,
-# matched to each dataset's timescale, with drought x income (aspirations/capabilities).
+# matched to each dataset's timescale, with drought slopes by income tercile (aspirations/capabilities).
 # Before the first run:  Rscript data_prep/build_spei_country.R   (see data_prep/SPEI_README.md)
 # Alternatives: config_original_spei01.yml, config_spei_jordan.yml, config_drought_interim.yml,
-#               config_nocontrols_conflict.yml (total drought effect, no conflict controls)
+#               config_nocontrols_conflict.yml (total drought effect, no conflict controls),
+#               config_drought_agriculture.yml (drought x agricultural share of GDP)
 # =============================================================================
 # Roles in international mobility networks — pipeline configuration
 # -----------------------------------------------------------------------------
@@ -77,7 +78,7 @@ flows:
                    drought_affected, drought_deaths, flood_affected, flood_deaths,
                    storm_affected, storm_deaths, landslide_affected, landslide_deaths]
       lags: [drought12_ext]
-      interactions: [[drought12_ext, gdp_pc], [drought12_ext_lag1, gdp_pc]]
+      slopes_by_group: [drought12_ext, drought12_ext_lag1]
 
   # --- UNHCR current release (download first: Rscript data_prep/get_unhcr_flows.R) ---
   # Refugee arrivals only: same definition as `unhcr` above, but the latest
@@ -219,7 +220,14 @@ models:
                conflict_events, conflict_deaths,
                drought_affected, drought_deaths, flood_affected, flood_deaths,
                storm_affected, storm_deaths, landslide_affected, landslide_deaths]
-  interactions: [[drought12_ext, gdp_pc]]
+  # Aspirations vs capabilities: the drought effect may differ by income. Countries
+  # are split into terciles of BASELINE GDP per capita (their value in their first
+  # period, so drought cannot move a country between groups), and each drought
+  # indicator gets a separate slope in each tercile. A Wald test checks whether
+  # the slopes differ.
+  baseline: [gdp_pc]
+  income_groups: {var: gdp_pc_base, n: 3}
+  slopes_by_group: [drought12_ext, spei48_dec]
   log_transform: ["^gdp_pc$", "^conflict_", "_deaths$", "_affected$"]   # log1p before scaling
   scale: true                 # z-score covariates (odds ratio per 1 SD)
   time_effect: factor         # none | linear | factor (period fixed effects)

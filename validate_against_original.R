@@ -23,6 +23,9 @@ cfg <- read_config("config.yml")
 clist <- read_csv(in_root(cfg, cfg$country_list), show_col_types = FALSE)
 xw <- load_crosswalk(cfg)
 
+# Read an original role file. Its ids look like "Kenya.2005": country name
+# and year joined by a dot. Names are matched to ISO3 through the country list,
+# then the crosswalk.
 read_original <- function(file) {
   x <- read_csv(file, show_col_types = FALSE)
   tibble(name = sub("\\.(19|20)\\d\\d$", "", x$id),
@@ -39,6 +42,8 @@ for (ds in c("unhcr", "undesa")) {
 
   # the original settings: one tie threshold of 1 person, k = 3
   sim <- rege(build_stacked_network(flows, 1), 3, verbose = FALSE)$similarity
+  # two ways of clustering: on the REGE distances (this pipeline) and on
+  # Euclidean distances between rows of the distance matrix (original scripts)
   for (mode in c("rege_distance", "legacy_profiles")) {
     cl <- cluster_roles(1 - sim, list(cluster_on = mode, linkage = "average",
                                       k = 3, k_range = c(2, 6)))
