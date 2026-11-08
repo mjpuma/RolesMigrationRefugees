@@ -17,6 +17,8 @@ cfg <- read_config(if (length(cfg_file)) cfg_file[1] else "config.yml")
 outdir <- dirname(out_path(cfg, "manuscript", "x"))
 xw <- load_crosswalk(cfg)
 
+# country land area (km2) from the Natural Earth 10m polygons, in an
+# equal-area projection (Mollweide, ESRI:54009)
 sf_use_s2(FALSE)
 shp <- in_root(cfg, "data/raw/ne_10m_admin_0_countries/ne_10m_admin_0_countries.shp")
 w <- st_read(shp, quiet = TRUE)
@@ -24,6 +26,8 @@ w$iso3 <- ifelse(w$ISO_A3 == "-99", w$ADM0_A3, w$ISO_A3)
 area <- w |> st_transform("ESRI:54009") |> mutate(km2 = as.numeric(st_area(geometry)) / 1e6) |>
   st_drop_geometry() |> group_by(iso3) |> summarise(km2 = sum(km2))
 
+# long-run (all years) country mean of a legacy wide SPEI file
+# (rows = Natural Earth names, columns X1990 ... X2020)
 wide_mean <- function(f, enc = "UTF-8") {
   read_csv(in_root(cfg, f), show_col_types = FALSE, locale = locale(encoding = enc), col_select = -1) |>
     mutate(iso3 = name_to_iso3(countriesADMIN, xw, f)) |> filter(!is.na(iso3)) |>
@@ -36,6 +40,8 @@ d <- bind_rows(
     group_by(iso3) |> summarise(value = mean(drought12_ext, na.rm = TRUE)) |>
     mutate(index = "C. SPEI-12 drought extent, area-weighted (this study)")) |>
   inner_join(area, by = "iso3")
+# Spearman rank correlation of each index with log10 area. A value near 0
+# means the index does not depend on country size.
 rho <- d |> group_by(index) |>
   summarise(rho = cor(value, log10(km2), method = "spearman", use = "complete.obs"), n = n(), .groups = "drop")
 print(rho)

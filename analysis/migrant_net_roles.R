@@ -27,18 +27,22 @@ suppressPackageStartupMessages({
 for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
 cfg_file <- commandArgs(trailingOnly = TRUE)   # optional: Rscript <script> my_config.yml
 cfg <- read_config(if (length(cfg_file)) cfg_file[1] else "config.yml")
-run_valued <- FALSE
-backbone_share <- 0.10
+run_valued <- FALSE              # TRUE adds the slow valued-REGGE variant (~20 extra minutes)
+backbone_share <- 0.10           # backbone threshold s (same as migrant_backbone.R reference)
 outdir <- dirname(out_path(cfg, "undesa_net", "x"))
 rc <- cfg$roles; rc$k <- "auto"
 
+# net flows from one Abel & Cohen estimate (see migrant_backbone.R)
 read_net <- function(method) {
   c2 <- cfg; c2$flows$undesa$value <- method; c2$flows$undesa$net <- TRUE
   read_flows(c2, "undesa")
 }
+# keep links carrying >= backbone_share of the origin's total net outflow
 backbone <- function(fl) fl |> group_by(origin, period) |>
   filter(flow >= backbone_share * sum(flow)) |> ungroup()
 
+# roles on one network: binary REGE (any tie >= 1 person) or valued REGGE,
+# then clustering with k chosen by silhouette
 fit <- function(fl, valued = FALSE) {
   sim <- if (valued) rege_valued(build_stacked_valued(fl, 1), rc$rege_iterations, "log1p")$similarity
          else rege(build_stacked_network(fl, 1), rc$rege_iterations, verbose = FALSE)$similarity
@@ -48,6 +52,7 @@ fit <- function(fl, valued = FALSE) {
 
 variants <- c("net", "backbone", if (run_valued) "valued")
 methods <- c("da_pb_closed", "da_min_closed")
+# every network variant x estimation method
 res <- list(); nets <- list()
 for (m in methods) {
   fl <- read_net(m); nets[[m]] <- fl
@@ -61,8 +66,12 @@ for (m in methods) {
 # ---- table of variants ------------------------------------------------------
 gross <- read_csv(out_path(cfg, "undesa", "roles_by_country_period.csv"), show_col_types = FALSE) |>
   mutate(node = node_id(iso3, period))
+# put a role vector in the node order of the gross-flow roles (NA where the
+# node is absent), so the ARI compares the same country-periods
 align <- function(r) unname(r$role[gross$node])
 ari <- function(a, b) { ok <- !is.na(a) & !is.na(b); adjusted_rand(a[ok], b[ok]) }
+# per variant: k, sizes, silhouette, agreement between the two estimation
+# methods, and agreement with the roles from gross flows
 tab <- map_dfr(variants, function(v) {
   a <- res[[paste(v, "da_pb_closed")]]; b <- res[[paste(v, "da_min_closed")]]
   tibble(network = v, k = a$k, sizes = paste(table(a$role), collapse = "/"),
@@ -77,6 +86,8 @@ print(as.data.frame(tab |> mutate(across(where(is.double), \(x) round(x, 2)))))
 cl_list <- read_csv(in_root(cfg, cfg$country_list), show_col_types = FALSE) |>
   select(iso3 = iso3c, country = name)
 nm <- node_metrics(nets$da_pb_closed, 1) |> mutate(node = node_id(iso3, period))
+# labels for net-network roles from the share of members that are pure net
+# senders / pure net receivers (> 50% decides)
 lab_net <- function(r, nm) {
   p <- nm |> mutate(role = r[node]) |> group_by(role) |>
     summarise(s = mean(pure_sender), rcv = mean(pure_receiver), .groups = "drop")
@@ -85,6 +96,7 @@ lab_net <- function(r, nm) {
                      TRUE ~ "both (net sender to some, net receiver from others)"), p$role)
 }
 bb_nm <- node_metrics(res$`backbone da_pb_closed`$flows, 1) |> mutate(node = node_id(iso3, period))
+# labels for backbone roles: same rule as label_backbone() in migrant_backbone.R
 lab_bb <- function(r) {
   p <- bb_nm |> mutate(role = r[node]) |> group_by(role) |>
     summarise(s = mean(pure_sender), rcv = mean(pure_receiver), .groups = "drop")
@@ -102,6 +114,8 @@ print(roles |> count(net_label, backbone_label))
 
 # ---- figures --------------------------------------------------------------------
 theme_set(theme_minimal(11) + theme(plot.title.position = "plot", legend.position = "bottom"))
+# N1: net outflow vs net inflow per country-period, coloured by role, for the
+# net network (panel A) and the backbone (panel B)
 pd <- bind_rows(
   roles |> transmute(panel = "A. Net network (all net ties >= 1 person)", label = net_label,
                      x = out_strength, y = in_strength, iso3, period, country, vol = in_strength + out_strength),
@@ -132,6 +146,8 @@ pN1 <- ggplot(pd, aes(log10(x + 1), log10(y + 1), colour = label)) +
 ggsave(file.path(outdir, "N1_net_role_scatter.png"), pN1, width = 8, height = 10, dpi = 200, bg = "white")
 
 # agreement between the two Abel & Cohen methods, gross vs net
+# reads the gross-flow agreement table written by migrant_volume_robustness.R
+# (run that script first)
 rob <- read_csv(out_path(cfg, "undesa", "robustness", "agreement_ari.csv"), show_col_types = FALSE)
 gross_ari <- rob$`REGE base, da_min_closed`[rob$grouping == "REGE 1/1k/10k/100k (base), k auto"]
 tier_ari  <- rob$`tiers 10k/100k/1M, da_min_closed`[rob$grouping == "fixed 10k/100k/1M (4 tiers)"]

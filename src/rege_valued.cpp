@@ -26,6 +26,11 @@
 using namespace Rcpp;
 
 // one-sided sum over partners k of i, matched against partners m of j
+//   nb[i]     partners of i (nodes with a tie to or from i)
+//   xo[i][a]  value of the tie i -> nb[i][a] (0 if none)
+//   xi[i][a]  value of the tie nb[i][a] -> i (0 if none)
+//   E         current similarity matrix
+//   num, den  running numerator and denominator, updated in place
 static inline void side(int i, int j,
                         const std::vector<std::vector<int>>& nb,
                         const std::vector<std::vector<double>>& xo,
@@ -65,6 +70,8 @@ static inline void side(int i, int j,
 // [[Rcpp::export]]
 List rege_valued_cpp(NumericMatrix X, int iterations, bool no_self_match) {
   int n = X.nrow();
+  // Pre-compute, for every node, its partners and the tie values in both
+  // directions, so the inner loops only visit actual ties (the network is sparse).
   std::vector<std::vector<int>> nb(n);
   std::vector<std::vector<double>> xo(n), xi(n);
   for (int i = 0; i < n; ++i) {
@@ -76,6 +83,7 @@ List rege_valued_cpp(NumericMatrix X, int iterations, bool no_self_match) {
       }
     }
   }
+  // start: every pair fully equivalent (as in the binary REGE in R/rege.R)
   NumericMatrix E(n, n);
   std::fill(E.begin(), E.end(), 1.0);
   NumericVector change(iterations);
@@ -83,7 +91,8 @@ List rege_valued_cpp(NumericMatrix X, int iterations, bool no_self_match) {
     NumericMatrix En(n, n);
     double maxch = 0.0;
     for (int i = 0; i < n; ++i) {
-      En(i, i) = 1.0;
+      En(i, i) = 1.0;                      // a node is fully equivalent to itself
+      // E is symmetric, so only pairs j > i are computed and copied to (j, i)
       for (int j = i + 1; j < n; ++j) {
         double num = 0.0, den = 0.0;
         side(i, j, nb, xo, xi, E, num, den, no_self_match);
@@ -92,10 +101,10 @@ List rege_valued_cpp(NumericMatrix X, int iterations, bool no_self_match) {
         En(i, j) = v; En(j, i) = v;
         maxch = std::max(maxch, std::abs(v - E(i, j)));
       }
-      if (i % 100 == 0) Rcpp::checkUserInterrupt();
+      if (i % 100 == 0) Rcpp::checkUserInterrupt();   // lets Ctrl-C stop a long run
     }
-    E = En;
-    change[it] = maxch;
+    E = En;                                // all pairs are updated from the previous E
+    change[it] = maxch;                    // largest change this iteration (convergence check)
     Rcpp::Rcout << "    valued REGE iteration " << it + 1
                 << ": max change " << maxch << std::endl;
   }

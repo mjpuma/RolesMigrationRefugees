@@ -81,6 +81,7 @@ using the file names in `config.yml`:
 | `ne_10m_admin_0_countries/` | Natural Earth 1:10m admin-0 countries (unzipped), [naturalearthdata.com](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/) |
 | `new_gdp_percapita_rows.csv` | GDP per capita for five territories missing from WDI (Anguilla, British Virgin Islands, Cook Islands, Montserrat, Palestine); fills gaps only |
 | `spei_country_year.csv` | written by `data_prep/build_spei_country.R` (see below) |
+| `wdi_agri_share.csv` | World Bank WDI, agriculture, forestry and fishing value added (% of GDP), `NV.AGR.TOTL.ZS`, reshaped to `iso3, year, agri_share` (only for `config_drought_agriculture.yml`) |
 | `unhcr_flows_latest.csv` | Current UNHCR forced-displacement flow data, written by `data_prep/get_unhcr_flows.R` (see below) |
 
 ### Current UNHCR flow data
@@ -190,6 +191,28 @@ loader in `R/drivers.R` that returns `iso3, year, <variables>`, add it to
 | `roles: linkage`, `k`, `k_range` | hierarchical clustering linkage; fixed k or `auto` (maximum average silhouette); range scanned for diagnostics |
 | `drivers: zero_fill`, `per_capita`, `aggregation` | how missing event data, population scaling and period aggregation are handled |
 | `models: covariates`, `log_transform`, `scale`, `time_effect`, `lag_periods`, `binary_engine`, `multinomial` | model specification |
+| `models: baseline` | variables copied as `<var>_base` = the country's value in its first period with data (time-invariant), e.g. `gdp_pc_base` |
+| `models: lags` | variables copied as `<var>_lag1` = value in the previous period (consecutive periods only), e.g. drought in year t-1 for annual refugee data |
+| `models: income_groups` | `{var: gdp_pc_base, n: 3}`: countries are split into baseline-income terciles (cut across countries, not rows); adds tercile dummies `income_g2`, `income_g3` |
+| `models: slopes_by_group` | variables whose slope is estimated separately in each income group (`<var>_x_g1..3`, replacing the common slope); a Wald test of equal slopes is added to the results (`wald_equal_slopes:<var>`, chi-square in `estimate`, df in `std.error`) |
+| `models: interactions` | pairs of covariates whose product of z-scores is added (e.g. drought x baseline agriculture share) |
+| `drivers: long_files` | extra long-format files (`iso3, year, <variables>`) joined into the driver panel, e.g. `data/raw/wdi_agri_share.csv` |
+| `flows: <dataset>: models:` | per-dataset overrides of any `models:` entry (replaces that entry; used for the annual refugee data) |
+
+Mixed models are fitted by `fit_glmer_robust()` (`R/models.R`): bobyqa, then
+Nelder-Mead, then nloptwrap. A fit is accepted only if lme4 reports no
+convergence problem and all standard errors are between 0.001 and 10;
+otherwise an ordinary logistic regression without the country random
+intercept is used. The `engine` column of every results table says which.
+
+Alternative configurations shipped with the repository:
+
+| Config | Purpose |
+|---|---|
+| `config.yml` | main analysis: area-weighted drought indicators, drought slopes by baseline-income tercile |
+| `config_nocontrols_conflict.yml` | as main, without the conflict variables (total rather than direct drought association) |
+| `config_drought_agriculture.yml` | drought x baseline agriculture share of GDP instead of income terciles |
+| `config_original_spei01.yml`, `config_spei_jordan.yml`, `config_drought_interim.yml` | earlier drought measures, for comparison (Table S1) |
 
 ## Methodological notes
 

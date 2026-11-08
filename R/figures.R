@@ -1,13 +1,21 @@
 # =============================================================================
 # figures.R — standard figures for any flow dataset
+#
+# Quick-look figures written by run_pipeline.R to <output_dir>/<dataset>/figures/.
+# The publication figures are made separately by analysis/manuscript_figures.R.
+# None of these functions changes any result; they only plot the outputs.
 # =============================================================================
 
+# Fixed colour per role number (recycled if there are more than 10 roles),
+# so role 1 has the same colour in every figure.
 role_palette <- function(k) {
   base <- c("#2a78b3", "#d9812b", "#3c9a5f", "#b34b4b", "#7b5ea7", "#8c7a5b",
             "#c265a6", "#6b6b6b", "#a8a232", "#2fa3b5")
   rep(base, length.out = k)
 }
 
+# Silhouette and WCSS against the number of roles k (from cluster_roles()).
+# k is chosen at the highest average silhouette.
 plot_k_diagnostics <- function(diag, dataset) {
   diag |>
     pivot_longer(c(avg_silhouette, wcss)) |>
@@ -19,6 +27,8 @@ plot_k_diagnostics <- function(diag, dataset) {
     theme_minimal(11)
 }
 
+# Mean people received (in-strength) and sent (out-strength) per country, by
+# role and period. + 1 before the log scale so zeros can be shown.
 plot_strength_by_role <- function(roles, dataset) {
   roles |>
     mutate(role = paste0(role, ": ", label)) |>
@@ -37,6 +47,9 @@ plot_strength_by_role <- function(roles, dataset) {
     theme_minimal(11) + theme(legend.position = "bottom")
 }
 
+# Tile chart: one row per country, one column per period, filled by role.
+# Countries are ordered by their mean role number so similar histories sit
+# together. `area` optionally restricts to one UN area (e.g. "Africa").
 plot_role_timeline <- function(roles, dataset, area = NULL) {
   d <- roles
   if (!is.null(area)) d <- d |> filter(.data$area == !!area)
@@ -53,6 +66,9 @@ plot_role_timeline <- function(roles, dataset, area = NULL) {
     theme_minimal(9) + theme(legend.position = "bottom", panel.grid = element_blank())
 }
 
+# Odds ratios (per 1 SD) with 95% CIs from fit_binary_role_models(), one
+# panel per role. Intercept, period terms and estimates flagged unstable are
+# left out; red = p < 0.05.
 plot_odds_ratios <- function(bin, dataset) {
   bin |>
     filter(!grepl("Intercept|period", term), !unstable) |>
@@ -70,6 +86,7 @@ plot_odds_ratios <- function(bin, dataset) {
     theme_minimal(10) + theme(legend.position = "bottom")
 }
 
+# Write all quick-look figures for one dataset (sizes in inches, 200 dpi).
 save_figures <- function(cfg, dataset, role_res, model_res = NULL) {
   save <- function(p, name, w = 8, h = 6) {
     ggsave(out_path(cfg, dataset, "figures", name), p, width = w, height = h, dpi = 200, bg = "white")

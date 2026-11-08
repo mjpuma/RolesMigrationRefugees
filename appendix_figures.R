@@ -18,6 +18,7 @@ for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
 cfg_file <- commandArgs(trailingOnly = TRUE)   # optional: Rscript <script> my_config.yml
 cfg <- read_config(if (length(cfg_file)) cfg_file[1] else "config.yml")
 
+# same role colours as the pipeline figures (R/figures.R)
 pal <- function(k) role_palette(k)
 theme_set(theme_minimal(11) + theme(legend.position = "bottom", plot.title.position = "plot"))
 
@@ -42,6 +43,8 @@ add_shape("ellipse", clip = shape_noclip,
                                   coords[i, 2] + size[i] / sqrt(asp[i]) * sin(t),
                                   col = col[i], border = NA)
   })
+# ellipse aspect ratio from in- and out-degree (1e-9 avoids division by zero),
+# capped to [1/shape_cap, shape_cap] and raised to shape_gamma
 degree_aspect <- function(indeg, outdeg) {
   r <- (indeg + 1e-9) / (outdeg + 1e-9)
   pmin(pmax(r, 1 / shape_cap), shape_cap)^shape_gamma
@@ -53,6 +56,7 @@ top_edges    <- c(undesa = 100,  unhcr = 150)    # strongest flows drawn in D
 for (ds in cfg$run) {
   msg("Appendix figures: ", ds)
   outdir <- out_path(cfg, ds, "figures", "appendix", "x"); outdir <- dirname(outdir)
+  # roles from run_pipeline.R, with a display label "<role>: <description>"
   roles <- read_csv(out_path(cfg, ds, "roles_by_country_period.csv"), show_col_types = FALSE) |>
     mutate(role_lab = factor(paste0(role, ": ", label)), name = coalesce(country, iso3))
   k <- n_distinct(roles$role)
@@ -61,6 +65,7 @@ for (ds in cfg$run) {
   title_ds <- if (ds == "unhcr") "Refugees (UNHCR)" else "Migrants (UN DESA / Abel & Cohen)"
 
   # ---- A. separation scatter ----------------------------------------------------
+  # A: out- vs inflow of every country-period; 3 largest per role labelled
   last <- max(roles$period)
   lab <- roles |> filter(period == last) |>
     group_by(role) |> slice_max(in_strength + out_strength, n = 3, with_ties = FALSE) |> ungroup()
@@ -83,6 +88,7 @@ for (ds in cfg$run) {
   sim <- readRDS(out_path(cfg, ds, "rege_similarity.rds"))$similarity
   D <- 1 - sim
   mds <- cmdscale(as.dist(D), k = 2, eig = TRUE)
+  # share of (positive) eigenvalue mass on the two plotted dimensions
   share <- round(100 * mds$eig[1:2] / sum(pmax(mds$eig, 0)), 1)
   # isoMDS cannot take zero distances between different points (identical REGE
   # profiles): give them a tiny positive value; the rank order is unchanged
@@ -115,6 +121,7 @@ for (ds in cfg$run) {
   msg("  nonmetric MDS stress-1 = ", round(nm_fit$stress / 100, 3))
 
   # ---- C. role-level network (blockmodel image) ---------------------------------
+  # total people between roles (both countries' roles in the same period)
   rl <- roles |> select(iso3, period, role, role_lab)
   E <- flows |>
     inner_join(rl, by = c("origin" = "iso3", "period")) |>
@@ -149,6 +156,7 @@ for (ds in cfg$run) {
   dev.off()
 
   # ---- C2. role-to-role destination shares (heatmap) ---------------------------
+  # row-normalised: share of each origin role's outflow going to each destination role
   H <- E |> group_by(role_lab_from) |> mutate(row_share = people / sum(people)) |> ungroup() |>
     mutate(from = factor(sub(":.*", "", role_lab_from)), to = factor(sub(":.*", "", role_lab_to)))
   pC2 <- ggplot(H, aes(to, forcats::fct_rev(from), fill = row_share)) +
@@ -173,6 +181,7 @@ for (ds in cfg$run) {
   gy <- graph_from_data_frame(fy |> select(origin, destination, flow), directed = TRUE)
   vr <- ry[match(V(gy)$name, ry$iso3), ]
   strength_tot <- vr$in_strength + vr$out_strength
+  # label the 20 largest countries overall and the 3 largest in each role
   top_lab <- rank(-strength_tot, ties.method = "first") <= 20 |
     ave(-strength_tot, vr$role, FUN = function(x) rank(x, ties.method = "first")) <= 3
   png(file.path(outdir, paste0("D_country_network_", yr, ".png")), width = 2200, height = 2000, res = 200)

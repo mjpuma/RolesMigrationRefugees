@@ -15,6 +15,7 @@
 #   Fig2_role_maps.png        modal role per country, and how often it holds
 #   Fig3_driver_odds.png      drivers of role membership (both networks)
 #   Fig4_role_change_odds.png drivers of refugee role changes
+#   Fig5_drought_by_income.png drought odds ratios by baseline-income tercile
 #   FigS_*.png                supplementary figures
 #   table1_role_summary.csv, image_flows_*.csv, manuscript_numbers.txt
 # =============================================================================
@@ -28,6 +29,7 @@ cfg_file <- commandArgs(trailingOnly = TRUE)   # optional: Rscript <script> my_c
 cfg <- read_config(if (length(cfg_file)) cfg_file[1] else "config.yml")
 outdir <- dirname(out_path(cfg, "manuscript", "x"))
 FONT <- "Liberation Sans"            # Arial-metric
+# all figures: 300 dpi PNG, white background, widths in inches (7.2 = PNAS Nexus two-column width)
 save_png <- function(p, name, w, h) ggsave(file.path(outdir, name), p, width = w, height = h,
                                            dpi = 300, bg = "white", device = ragg::agg_png)
 theme_set(theme_minimal(9, base_family = FONT) +
@@ -43,22 +45,30 @@ MIG_LAB <- c(`1` = "M1 source", `2` = "M2 intermediate", `3` = "M3 terminal dest
 pos_of  <- c(`1` = "send", `2` = "mid", `3` = "recv")
 ref_cols <- setNames(POS_COL[pos_of], REF_LAB)
 mig_cols <- setNames(POS_COL[pos_of], MIG_LAB)
+# Every number quoted in the manuscript is written to manuscript_numbers.txt
+# by note(), so the text can be checked against the run that made the figures.
 nums <- character()                  # numbers quoted in the text
 note <- function(...) { s <- paste0(...); nums <<- c(nums, s); message(s) }
 
 # ---- data -----------------------------------------------------------------------
 ref_roles <- read_csv(out_path(cfg, "unhcr", "roles_by_country_period.csv"), show_col_types = FALSE) |>
   mutate(name = coalesce(country, iso3))
+# safety check: role 1 must be the sender-only role and role 3 the receiver-only
+# role, otherwise the R1-R3 codes would be attached to the wrong roles
 lab_chk <- ref_roles |> distinct(role, label) |> arrange(role)
 stopifnot(grepl("sender only", lab_chk$label[1]), grepl("receiver only", lab_chk$label[3]))
 ref_roles <- ref_roles |> mutate(code = REF_LAB[as.character(role)])
 
 mig_roles <- read_csv(out_path(cfg, "undesa_backbone", "backbone_roles.csv"), show_col_types = FALSE) |>
   mutate(name = coalesce(country, iso3))
+# same check for the backbone roles (migrant_backbone.R orders them source, intermediate, terminal)
 stopifnot(grepl("^source", mig_roles$label[mig_roles$role == 1][1]),
           grepl("^intermediate", mig_roles$label[mig_roles$role == 2][1]))
 mig_roles <- mig_roles |> mutate(code = MIG_LAB[as.character(role)])
 
+# flows used for the image graphs and networks: refugee arrivals (>= 1 person);
+# net migrant flows; and the backbone (>= 10% of the origin's net outflow,
+# same rule as migrant_backbone.R)
 ref_flows <- read_flows(cfg, "unhcr") |> filter(flow >= 1)
 c2 <- cfg; c2$flows$undesa$net <- TRUE
 net_all <- read_flows(c2, "undesa")
@@ -66,6 +76,8 @@ net_flows <- net_all |> filter(flow >= 1)
 bb_flows <- net_all |> group_by(origin, period) |> filter(flow >= 0.10 * sum(flow)) |> ungroup()
 
 # ---- Fig 1 A/B: role-level image graphs -------------------------------------------
+# Role-level "image" of a network: total people moving from each role to each
+# role (both ends looked up in the same period), and the share of all people.
 image_edges <- function(flows, roles) {
   rl <- roles |> select(iso3, period, role)
   flows |>
@@ -80,6 +92,9 @@ E_mig <- image_edges(bb_flows, mig_roles)
 write_csv(E_ref, file.path(outdir, "image_flows_refugees.csv"))
 write_csv(E_mig, file.path(outdir, "image_flows_migrants_backbone.csv"))
 
+# Draw the image graph: one circle per role (area ~ number of country-periods),
+# arrows between roles with width and label = share of all people moving,
+# self-loops for flows within a role. Pure geometry; no results are computed here.
 plot_image <- function(E, roles, labs, title, caption) {
   E <- E |> filter(share >= 0.001)   # hide links carrying < 0.1% of the flow
   P <- tibble(role = 1:3, x = c(0, 1, 2), y = c(0, 0.85, 0),
@@ -148,6 +163,7 @@ pB <- plot_image(E_mig, mig_roles, MIG_LAB, "Migrants (backbone of net flows, 19
                  "Arrow width and label: share of all net migration on the backbone")
 
 # ---- Fig 1 C/D: separation scatter -------------------------------------------------
+# label the two largest country-periods of each role in the last period
 lab_pts <- function(d, xv, yv) d |> filter(period == max(period)) |> group_by(role) |>
   slice_max(.data[[xv]] + .data[[yv]], n = 2, with_ties = FALSE) |> ungroup()
 pC_d <- ref_roles |> mutate(xo = log10(out_strength + 1), yi = log10(in_strength + 1))
@@ -161,6 +177,7 @@ pC <- ggplot(pC_d, aes(xo, yi, colour = code)) +
   labs(x = "Refugees leaving, log10(people + 1)", y = "Refugees arriving, log10(people + 1)") +
   guides(colour = guide_legend(nrow = 2, byrow = TRUE, override.aes = list(size = 2.5, alpha = 1)))
 
+# net in- and outflow of every country-period on the full net network
 nm <- node_metrics(net_flows, 1) |> select(iso3, period, net_in = in_strength, net_out = out_strength)
 pD_d <- mig_roles |> select(-any_of(c("net_in", "net_out"))) |> left_join(nm, by = c("iso3", "period")) |>
   mutate(xo = log10(coalesce(net_out, 0) + 1), yi = log10(coalesce(net_in, 0) + 1))
@@ -188,11 +205,15 @@ world <- sf::read_sf("data_ref/ne_110m_admin_0_countries.geojson") |>   # Natura
   mutate(iso3 = ifelse(ISO_A3 == "-99", ADM0_A3, ISO_A3)) |>
   mutate(iso3 = recode(iso3, SDS = "SSD", KOS = "XKX")) |>
   filter(ADM0_A3 != "ATA") |> select(iso3, geometry)
+# per country: periods observed, most frequent (modal) role, share of periods
+# in that role, and number of role switches
 modal <- function(roles, labs) roles |> group_by(iso3) |>
   summarise(n = n(), mode = as.integer(names(which.max(table(role)))),
             share = max(table(role)) / n(), switches = sum(role != lag(role), na.rm = TRUE), .groups = "drop") |>
   mutate(code = labs[as.character(mode)],
          stab = cut(share, c(0, 0.6, 0.85, 1.01), labels = c("< 60%", "60–85%", "> 85%")))
+# World map of the modal role; grey where no role holds >= 60% of periods or
+# (refugees) where fewer than min_n years are recorded. Robinson projection.
 map_panel <- function(m, cols, title, min_n = 1) {
   extra <- c(`No dominant role (< 60% of periods)` = "grey55", `Fewer than 5 years recorded` = "grey80")
   m <- m |> mutate(cat = case_when(n < min_n ~ "Fewer than 5 years recorded",
@@ -230,27 +251,47 @@ note("Refugee countries always in same role: ", sum(m_ref$share == 1 & m_ref$n >
      "; migrants backbone: ", sum(m_mig$share == 1 & m_mig$n > 1), " of ", sum(m_mig$n > 1))
 
 # ---- Fig 3: drivers of role membership ----------------------------------------------
-DRV <- c(gdp_pc = "GDP per capita", conflict_events = "Conflict events", conflict_deaths = "Conflict deaths",
+# Display names for model terms (only terms listed here are plotted).
+# The tercile terms come from the income_groups / slopes_by_group options in
+# config.yml: <var>_x_g<k> is the slope of <var> among countries in baseline-
+# income tercile k (1 = lowest); income_g2 / income_g3 are tercile main effects.
+TERC <- c(g1 = "low income", g2 = "middle income", g3 = "high income")
+DRV <- c(gdp_pc = "GDP per capita",
+         income_g2 = "Middle income tercile (vs low)", income_g3 = "High income tercile (vs low)",
+         agri_share_base = "Agriculture share of GDP (baseline)",
+         conflict_events = "Conflict events", conflict_deaths = "Conflict deaths",
          drought12_ext = "Drought extent (SPEI-12)", drought12_ext_lag1 = "Drought extent, previous year",
+         setNames(paste0("Drought extent: ", TERC), paste0("drought12_ext_x_", names(TERC))),
+         setNames(paste0("Drought extent, prev. year: ", TERC), paste0("drought12_ext_lag1_x_", names(TERC))),
          spei48_dec = "SPEI-48 at period start",
+         setNames(paste0("SPEI-48 at period start: ", TERC), paste0("spei48_dec_x_", names(TERC))),
          drought12_ext_x_gdp_pc = "Drought extent x GDP", drought12_ext_lag1_x_gdp_pc = "Drought (prev. year) x GDP",
+         drought12_ext_x_agri_share_base = "Drought extent x agriculture share",
+         drought12_ext_lag1_x_agri_share_base = "Drought (prev. year) x agriculture share",
+         spei48_dec_x_agri_share_base = "SPEI-48 x agriculture share",
          spei_min = "SPEI minimum", spei_mean = "SPEI mean", spei_mean_cv = "SPEI variability (CV)",
          drought_affected = "Drought: affected", drought_deaths = "Drought: deaths",
          flood_affected = "Flood: affected", flood_deaths = "Flood: deaths",
          storm_affected = "Storm: affected", storm_deaths = "Storm: deaths",
          landslide_affected = "Landslide: affected", landslide_deaths = "Landslide: deaths")
-GRP <- setNames(ifelse(grepl("^gdp", names(DRV)), "Economy",
+# panel group of each term: economy (GDP, income terciles, agriculture share),
+# conflict, climate (drought indicators and their interactions), disasters (EM-DAT)
+GRP <- setNames(ifelse(grepl("^gdp|^income_g|^agri", names(DRV)), "Economy",
                 ifelse(grepl("^conflict", names(DRV)), "Conflict",
                 ifelse(grepl("spei|drought12", names(DRV)), "Climate", "Disasters"))), names(DRV))
+# model results from run_pipeline.R (refugees) and migrant_backbone.R (migrants)
 b_ref <- read_csv(out_path(cfg, "unhcr", "binary_role_models.csv"), show_col_types = FALSE) |>
   mutate(code = REF_LAB[as.character(role)], net = "Refugees")
 b_mig <- read_csv(out_path(cfg, "undesa_backbone", "binary_role_models.csv"), show_col_types = FALSE) |>
   mutate(code = MIG_LAB[as.character(role)], net = "Migrants")
-B <- bind_rows(b_ref, b_mig) |> filter(term %in% names(DRV), !unstable, n_events >= 20) |>
+# Fig 3 shows every driver except the tercile-specific drought slopes, which
+# have their own figure (Fig 5). Roles with < 20 members are not shown.
+B <- bind_rows(b_ref, b_mig) |> filter(term %in% names(DRV), !grepl("_x_g[0-9]$", term), !unstable, n_events >= 20) |>
   mutate(driver = factor(DRV[term], rev(DRV)), grp = factor(GRP[term], c("Economy", "Conflict", "Climate", "Disasters")),
          panel = factor(paste0(code, "\n(", n_events, " of ", n_obs, ")"),
                         unique(paste0(code, "\n(", n_events, " of ", n_obs, ")"))),
          pos = pos_of[as.character(role)], sig = p.value < 0.05)
+# filled, role-coloured points = p < 0.05; open grey points = p >= 0.05
 fig3 <- ggplot(B, aes(odds_ratio, driver)) +
   geom_vline(xintercept = 1, colour = "grey60", linewidth = 0.3) +
   geom_errorbarh(aes(xmin = or_low, xmax = or_high, colour = ifelse(sig, pos, "ns")), height = 0, linewidth = 0.5) +
@@ -269,8 +310,10 @@ note("Significant role drivers (p<0.05):\n", paste(capture.output(print(as.data.
 note("Model sizes: ", paste(unique(sprintf("%s n_obs=%d events=%d", B$code, B$n_obs, B$n_events)), collapse = "; "))
 
 # ---- Fig 4: refugee role changes ------------------------------------------------------
+# results from refugee_role_changes.R: rows = specification (level / change), columns = type of change
 T <- read_csv(out_path(cfg, "unhcr", "role_changes", "transition_models.csv"), show_col_types = FALSE) |>
-  filter(!unstable, driver %in% names(DRV)) |>
+  # tercile-specific drought slopes are shown in Fig 5, not here
+  filter(!unstable, driver %in% names(DRV), !grepl("_x_g[0-9]$", driver)) |>
   mutate(driver = factor(DRV[driver], rev(DRV)), sig = p.value < 0.05,
          change = factor(paste0(change, "\n(", events, " of ", n, ")"), unique(paste0(change, "\n(", events, " of ", n, ")"))),
          spec = factor(ifelse(spec == "level in year t", "Driver level in year of change", "Change in driver from previous year"),
@@ -291,7 +334,70 @@ note("Role-change significant (p<0.05):\n", paste(capture.output(print(as.data.f
   transmute(change = gsub("\n.*", "", change), spec, driver, OR = round(odds_ratio, 2), lo = round(or_low, 2),
             hi = round(or_high, 2), p = signif(p.value, 2), engine)))), collapse = "\n"))
 
+# ---- Fig 5: drought slopes by baseline-income tercile ---------------------------------
+# One odds ratio per drought indicator and income tercile, for every role model
+# and every role-change model (level spec), with the Wald test of equal slopes
+# across terciles printed in each panel. Shown only when the models were run
+# with slopes_by_group (main config).
+tw <- bind_rows(
+  bind_rows(b_ref, b_mig) |> filter(n_events >= 20) |>
+    transmute(model = paste0(code, "\n(", n_events, " of ", n_obs, ")"), term, odds_ratio, or_low, or_high,
+              p.value, std.error, estimate, unstable),
+  read_csv(out_path(cfg, "unhcr", "role_changes", "transition_models.csv"), show_col_types = FALSE) |>
+    filter(spec == "level in year t") |>
+    transmute(model = paste0(change, "\n(", events, " of ", n, ")"), term, odds_ratio, or_low, or_high,
+              p.value, std.error, estimate, unstable))
+if (any(grepl("_x_g[0-9]$", tw$term))) {
+  model_order <- unique(tw$model)
+  slopes <- tw |> filter(grepl("_x_g[0-9]$", term), !unstable) |>
+    mutate(var = sub("_x_g[0-9]$", "", term), tercile = TERC[sub(".*_x_", "", term)],
+           var_lab = c(drought12_ext = "Drought extent (year t / 5-yr mean)",
+                       drought12_ext_lag1 = "Drought extent, previous year",
+                       spei48_dec = "SPEI-48 at period start (higher = wetter)")[var],
+           sig = p.value < 0.05, model = factor(model, model_order),
+           tercile = factor(tercile, TERC))
+  # Wald test of equal slopes, one per model and drought indicator (printed at the right of each row)
+  wald <- tw |> filter(grepl("^wald_equal_slopes:", term)) |>
+    mutate(var = sub("^wald_equal_slopes:", "", term), model = factor(model, model_order),
+           var_lab = c(drought12_ext = "Drought extent (year t / 5-yr mean)",
+                       drought12_ext_lag1 = "Drought extent, previous year",
+                       spei48_dec = "SPEI-48 at period start (higher = wetter)")[var],
+           txt = sprintf("equal slopes: p = %.2f", p.value))
+  note("Equal-slope Wald tests:\n", paste(capture.output(print(as.data.frame(
+    tw |> filter(grepl("^wald_", term)) |> transmute(model = gsub("\n.*", "", model), term,
+                                                     chi2 = round(estimate, 2), df = std.error, p = signif(p.value, 2))))),
+    collapse = "\n"))
+  note("Tercile slopes:\n", paste(capture.output(print(as.data.frame(slopes |>
+    transmute(model = gsub("\n.*", "", model), var, tercile, OR = round(odds_ratio, 2), lo = round(or_low, 2),
+              hi = round(or_high, 2), p = signif(p.value, 2))))), collapse = "\n"))
+  TERC_COL <- setNames(c("#C8553D", "#8C8C8C", "#2D6FA8"), TERC)   # low / middle / high income
+  # one row per model, one panel per drought indicator; colour = income tercile
+  slopes <- slopes |> mutate(model = factor(model, rev(model_order)))
+  wald <- wald |> mutate(model = factor(model, rev(model_order)))
+  fig5 <- ggplot(slopes, aes(odds_ratio, model, colour = tercile, group = tercile)) +
+    geom_vline(xintercept = 1, colour = "grey60", linewidth = 0.3) +
+    geom_errorbarh(aes(xmin = or_low, xmax = or_high), height = 0, linewidth = 0.5,
+                   position = position_dodge(width = 0.65)) +
+    geom_point(aes(shape = sig), size = 1.6, fill = "white", position = position_dodge(width = 0.65)) +
+    geom_text(data = wald, aes(x = 9, y = model, label = txt), inherit.aes = FALSE, hjust = 1,
+              size = 2.2, family = FONT, colour = "grey30") +
+    scale_colour_manual(values = TERC_COL, name = "Baseline income tercile", breaks = TERC) +
+    scale_shape_manual(values = c(`FALSE` = 21, `TRUE` = 16), labels = c("p ≥ 0.05", "p < 0.05"), name = NULL) +
+    scale_x_log10(breaks = c(0.25, 0.5, 1, 2, 4), labels = c("0.25", "0.5", "1", "2", "4")) +
+    coord_cartesian(xlim = c(0.25, 9)) +
+    facet_grid(var_lab ~ ., scales = "free_y", space = "free_y", labeller = label_wrap_gen(18)) +
+    labs(x = "Odds ratio per 1 SD of the drought indicator (95% CI, log scale)", y = NULL) +
+    theme(strip.text.y = element_text(size = 7.5, face = "bold", angle = 0, hjust = 0),
+          axis.text.y = element_text(size = 7.5), axis.text.x = element_text(size = 7),
+          legend.text = element_text(size = 7), legend.box = "vertical",
+          panel.grid.major.y = element_blank()) +
+    guides(colour = guide_legend(order = 1), shape = guide_legend(order = 2))
+  save_png(fig5, "Fig5_drought_by_income.png", 7.2, 6.2)
+}
+
 # ---- Table 1: role summary -------------------------------------------------------------
+# Table 1: size, degrees, median strengths and share net receiving by role,
+# plus the four largest countries of each role in the last period
 summ <- function(roles, net) roles |> group_by(code) |>
   summarise(network = net, n = n(), countries = n_distinct(iso3),
             in_degree = mean(in_degree, na.rm = TRUE), out_degree = mean(out_degree, na.rm = TRUE),
@@ -308,6 +414,7 @@ write_csv(T1, file.path(outdir, "table1_role_summary.csv"))
 note("Table 1:\n", paste(capture.output(print(as.data.frame(T1 |> mutate(across(where(is.double), \(x) signif(x, 3)))))), collapse = "\n"))
 
 # ---- SI: Africa timelines, side by side -------------------------------------------------
+# role of every African country over time (tiles), refugees and migrants side by side
 afr <- function(roles, cols, title, yrs) roles |> filter(area == "Africa") |>
   ggplot(aes(period, forcats::fct_rev(name), fill = code)) +
   geom_tile(colour = "white", linewidth = 0.2) +
@@ -330,6 +437,9 @@ add_shape("ellipse", clip = shape_noclip,
     for (i in seq_len(n)) polygon(coords[i, 1] + size[i] * sqrt(asp[i]) * cos(t),
                                   coords[i, 2] + size[i] / sqrt(asp[i]) * sin(t), col = col[i], border = NA)
   })
+# Country network for one year: Fruchterman-Reingold layout weighted by log
+# flow; node colour = role, size = volume, ellipse shape = in/out degree ratio
+# (capped at 4), edge width = log flow; the 25 largest countries are labelled.
 network_plot <- function(fy, ry, cols, file, title, foot, top_n = 25) {
   gy <- graph_from_data_frame(fy |> select(origin, destination, flow), directed = TRUE)
   vr <- ry[match(V(gy)$name, ry$iso3), ]

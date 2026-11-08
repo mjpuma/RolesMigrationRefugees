@@ -63,6 +63,31 @@ minimum.
 Models with conflict controls estimate the direct association; dropping the
 conflict variables gives the total association. Report both.
 
+## Drought by baseline income and by agriculture share (`config.yml`, 8 Nov 2026)
+
+The main configuration now gives each drought indicator a separate slope in
+each tercile of baseline GDP per capita (the country's GDP in its first period
+with data; terciles cut across countries), with tercile main effects, instead
+of the drought x current-GDP product. A Wald test (2 df) asks whether the three
+slopes are equal. `config_drought_agriculture.yml` instead interacts drought
+with the baseline agriculture share of GDP (World Bank NV.AGR.TOTL.ZS,
+`data/raw/wdi_agri_share.csv`). See `R/models.R` for the equations.
+
+* Refugee and migrant (backbone) roles: 1 of 30 tercile slopes has p < 0.05
+  (sender-only refugee countries, middle tercile, OR 0.64, p = 0.031); no
+  Wald test rejects equal slopes (p = 0.11-0.97).
+* Refugee role changes: receiver-only countries start sending more often in
+  drought years in the lowest tercile (OR 1.62, p = 0.048; highest tercile
+  1.57, p = 0.14; Wald p = 0.42) and when drought extent rises from the
+  previous year (1.27, p = 0.047).
+* Agriculture: no drought x agriculture interaction for any role (closest
+  receiver-only refugees, 1.23, p = 0.09); for countries that start hosting,
+  agriculture share 0.61 (p = 0.04) and drought x agriculture 0.64 (p = 0.05).
+* Without conflict controls the drought results are the same.
+* Current GDP and baseline tercile are correlated (Spearman 0.77 refugees,
+  0.87 migrants), so GDP odds ratios have wider intervals in these models;
+  joint Wald tests of GDP and the tercile terms are significant for every role.
+
 ## Results with the area-weighted SPEI-12 / SPEI-48 indicators (`config.yml`, 7 Nov 2026)
 
 Inputs: SPEIbase v2.9 `spei12.nc`, `spei48.nc`; Natural Earth 1:10m admin-0

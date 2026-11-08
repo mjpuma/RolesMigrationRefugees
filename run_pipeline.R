@@ -10,15 +10,28 @@
 #   3. aggregate drivers   (R/drivers.R)
 #   4. role models         (R/models.R)            -> output/<dataset>/*_models.csv
 #   5. figures             (R/figures.R)           -> output/<dataset>/figures/
+#
+# After this, the analysis/ scripts build on its outputs (run them with the
+# same config file):
+#   analysis/migrant_backbone.R       backbone roles M1-M3 and their models
+#   analysis/refugee_role_changes.R   what precedes a change of refugee role
+#   analysis/manuscript_figures.R     publication figures
+#
+# Output folder: `output_dir` in the config (output/ for config.yml).
 # =============================================================================
 
+# optional first command-line argument = config file
 args <- commandArgs(trailingOnly = TRUE)
 config_file <- if (length(args)) args[1] else "config.yml"
 
+# load every function in R/ (must be run from the project folder)
 for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
 cfg <- read_config(config_file)
+# fixed random seed: nothing in the main analysis is random, but this keeps
+# any random step (e.g. tie-breaking in optional methods) reproducible
 set.seed(cfg$seed)
 
+# annual country panel of all drivers, built once and shared by all datasets
 driver_panel <- build_driver_panel(cfg)
 results <- list()
 
@@ -27,6 +40,7 @@ for (dataset in cfg$run) {
   flows <- read_flows(cfg, dataset)
   role_res <- run_roles(cfg, dataset, flows)
 
+  # drivers summarised over this dataset's periods (5-year or annual)
   drivers <- aggregate_drivers(cfg, driver_panel, flows)
   write_csv(drivers, out_path(cfg, dataset, "drivers_by_country_period.csv"))
 
@@ -35,6 +49,7 @@ for (dataset in cfg$run) {
   results[[dataset]] <- list(roles = role_res, models = model_res)
 }
 
+# everything in one R object, plus the package versions used (for reproducibility)
 saveRDS(results, out_path(cfg, "all_results.rds"))
 writeLines(capture.output(sessionInfo()), out_path(cfg, "sessionInfo.txt"))
 msg("Done. Results in ", file.path(cfg$root, cfg$output_dir))
