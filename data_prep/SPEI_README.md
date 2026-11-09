@@ -4,18 +4,18 @@ Three drought specifications are available. Each has its own config file and
 output folder, so they can be run and compared side by side:
 
 ```sh
-Rscript run_pipeline.R config_<name>.yml
-Rscript analysis/migrant_backbone.R config_<name>.yml
-Rscript analysis/refugee_role_changes.R config_<name>.yml
+Rscript run_pipeline.R configs/config_<name>.yml
+Rscript analysis/migrant_backbone.R configs/config_<name>.yml
+Rscript analysis/refugee_role_changes.R configs/config_<name>.yml
 ```
 
 | Config | Drought measure | Status |
 |---|---|---|
 | `config.yml` (main) | Area-weighted SPEI-12 drought extent and SPEI-48 from `build_spei_country.R`, matched to each dataset's timescale, drought x income | Main analysis since 7 Nov 2026. Needs SPEIbase `spei12.nc`, `spei48.nc` and Natural Earth 1:10m countries in `data/raw/`. |
-| `config_nocontrols_conflict.yml` | As main, without conflict variables | Total drought association (drought may act through conflict). |
-| `config_original_spei01.yml` | SPEI-01 annual minimum, mean and CV (original files) | First manuscript draft. The minimum scales with country size (see below). |
-| `config_spei_jordan.yml` | Jordan's SPEI-48 annual average of monthly minima (`fromJordan/`), standardized within country | Kept as delivered, plus the within-country fix. Adds ~28 small territories. |
-| `config_drought_interim.yml` | SPEI-01 annual country mean, previous-year lag for refugees, drought × income | Runs now. Interim measure for the specification below. |
+| `configs/config_nocontrols_conflict.yml` | As main, without conflict variables | Total drought association (drought may act through conflict). |
+| `configs/config_original_spei01.yml` | SPEI-01 annual minimum, mean and CV (original files) | First manuscript draft. The minimum scales with country size (see below). |
+| `configs/config_spei_jordan.yml` | Jordan's SPEI-48 annual average of monthly minima (`fromJordan/`), standardized within country | Kept as delivered, plus the within-country fix. Adds ~28 small territories. |
+| `configs/config_drought_interim.yml` | SPEI-01 annual country mean, previous-year lag for refugees, drought × income | Runs now. Interim measure for the specification below. |
 
 ## Why the minimum over grid cells is not used
 
@@ -69,7 +69,7 @@ The main configuration now gives each drought indicator a separate slope in
 each tercile of baseline GDP per capita (the country's GDP in its first period
 with data; terciles cut across countries), with tercile main effects, instead
 of the drought x current-GDP product. A Wald test (2 df) asks whether the three
-slopes are equal. `config_drought_agriculture.yml` instead interacts drought
+slopes are equal. `configs/config_drought_agriculture.yml` instead interacts drought
 with the baseline agriculture share of GDP (World Bank NV.AGR.TOTL.ZS,
 `data/raw/wdi_agri_share.csv`). See `R/models.R` for the equations.
 
@@ -120,7 +120,7 @@ With 30+ drought tests, p-values near 0.03-0.05 are weak evidence; the
 drought -> start-sending association is the only climate result consistent
 across the interim and final measures.
 
-## Interim results (`config_drought_interim.yml`, 7 Nov 2026)
+## Interim results (`configs/config_drought_interim.yml`, 7 Nov 2026)
 
 Using the size-neutral SPEI-01 annual mean as a stand-in:
 

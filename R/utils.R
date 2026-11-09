@@ -38,7 +38,14 @@ msg <- function(...) message(format(Sys.time(), "%H:%M:%S"), "  ", ...)
 # pipeline gives the same result whatever the R working directory is.
 read_config <- function(path = "config.yml") {
   cfg <- yaml::read_yaml(path)
-  cfg$root <- normalizePath(dirname(path))
+  # Project root: the nearest folder, starting from the config file's own, that
+  # holds run_pipeline.R. The main config.yml sits in the root; variants are in configs/.
+  root <- normalizePath(dirname(path))
+  while (!file.exists(file.path(root, "run_pipeline.R"))) {
+    if (dirname(root) == root) stop("Cannot find the project root (run_pipeline.R) above ", path)
+    root <- dirname(root)
+  }
+  cfg$root <- root
   cfg
 }
 

@@ -4,7 +4,7 @@
 # Compares role assignments from this pipeline with the ones saved by the
 # original FINAL_*_role_assessment.R scripts (results/*_full_roles_k3.csv).
 #
-#   Rscript validate_against_original.R "legacy/results"
+#   Rscript analysis/validate_against_original.R "legacy/results"
 #
 # Findings when this was written (Sept 2026):
 #   * UNHCR: identical partition (adjusted Rand index = 1.00).

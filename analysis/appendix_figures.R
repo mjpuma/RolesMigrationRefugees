@@ -1,7 +1,7 @@
 # =============================================================================
 # appendix_figures.R — network diagrams and role-separation plots
 #
-#   Rscript appendix_figures.R      (after run_pipeline.R)
+#   Rscript analysis/appendix_figures.R      (after run_pipeline.R)
 #
 # For each dataset (undesa, unhcr) writes to output/<dataset>/figures/appendix/:
 #   A_separation_scatter.png  in- vs out-flow per country-period, coloured by role
