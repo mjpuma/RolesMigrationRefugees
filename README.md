@@ -1,7 +1,7 @@
 # RolesMigrationRefugees
 
-Code for a manuscript in preparation by Zurek-Ost, Hood, Puma, Muneepeerakul and
-Johnson on the roles of countries in international **refugee** and **migrant**
+Code for a manuscript in preparation by Zurek-Ost, Hood, Puma, Muneepeerakul,
+Traff and Johnson on the roles of countries in international **refugee** and **migrant**
 networks. The analysis has three steps:
 
 1. Build a network of flows between countries for each year or period.
