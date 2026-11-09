@@ -3,7 +3,8 @@
 #
 # (a) One binary model per role: P(role = r) vs. all other roles, with a
 #     random intercept per country (repeated observations over periods).
-#     This is what the manuscript reports (odds ratios per role).
+#     This is what the manuscript reports (odds ratios per role). The main
+#     config fits it in glmmTMB (binary_engine: glmmTMB; see fit_mixed()).
 # (b) Optionally one multinomial baseline-category logit over all roles
 #     (mclogit::mblogit), the model the manuscript names.
 #
@@ -19,6 +20,25 @@
 #   g_t    period fixed effects (time_effect: factor) or a linear trend
 #   u_c    country random intercept (absorbs stable country differences)
 #   exp(b_j) = odds ratio for a 1-SD higher x_j, other covariates fixed
+#
+# Within and between countries (config: within_between; Bafumi and Gelman 2006).
+# A driver x can differ across countries and over time in one country, and the
+# two need not have the same association with a role. Each listed driver is
+# replaced by two terms, in units of the driver's overall SD:
+#
+#   x_ct = xbar_c + (x_ct - xbar_c)
+#   ... + b_B xbar_c + b_W (x_ct - xbar_c) + ...
+#
+#   b_W    "in a year or period when country c has more of x than is usual for it"
+#   b_B    "a country that has more of x than other countries, on average"
+# With one coefficient, the model assumes b_W = b_B (analysis/within_between_tests.R).
+#
+# Standard errors. u_c captures stable differences between countries, but given
+# u_c the model treats a country's successive periods as independent. Roles and
+# drivers persist, so the model-based standard errors of the within-country terms
+# are too small. Figs. 3 and 4 and the Results therefore use a country cluster
+# bootstrap (analysis/regression_robustness.R, part "bootstrap"); the or_low and
+# or_high columns written here remain model-based (exp(b +/- 1.96 SE)).
 #
 # Drought by income group (config: income_groups, slopes_by_group). The
 # common drought slope b_D is replaced by one slope per baseline-income
@@ -116,6 +136,15 @@ prepare_model_data <- function(cfg, roles, drivers) {
   # z-score every covariate over the model sample: (x - mean) / SD.
   # The grouping variable (gdp_pc_base) is not scaled; it is only used to cut terciles.
   if (isTRUE(mc$scale)) d <- d |> mutate(across(all_of(covs), \(x) as.numeric(scale(x))))
+
+  # Within/between split (see header): country mean and deviation from it,
+  # computed from the standardized values over the country's rows in the model sample
+  wb_vars <- intersect(unlist(mc$within_between), covs)
+  if (length(wb_vars)) {
+    d <- d |> group_by(iso3) |>
+      mutate(across(all_of(wb_vars), list(between = mean, within = \(x) x - mean(x)), .names = "{.col}_{.fn}")) |> ungroup()
+    covs <- c(setdiff(covs, wb_vars), paste0(wb_vars, "_within"), paste0(wb_vars, "_between"))
+  }
 
   # Income groups: quantile groups (terciles for n = 3) of a baseline variable,
   # cut across COUNTRIES (one value per country), not across country-periods.
@@ -242,6 +271,25 @@ fit_glmer_robust <- function(f_mixed, f_glm, d, label = "") {
   fit
 }
 
+# Main fitting function: glmmTMB (same Laplace likelihood as lme4, much faster and
+# more stable for these models); a fit that does not converge goes through
+# fit_glmer_robust(). The engine used is stored in attr(fit, "engine").
+fit_mixed <- function(f_mixed, f_glm, d, label = "") {
+  fit <- tryCatch(suppressWarnings(suppressMessages(
+    glmmTMB::glmmTMB(f_mixed, data = d, family = binomial, control = glmmTMB::glmmTMBControl(parallel = 1)))),
+    error = function(e) NULL)
+  if (!is.null(fit) && fit$fit$convergence == 0 && isTRUE(fit$sdr$pdHess)) {
+    attr(fit, "engine") <- "mixed (glmmTMB)"
+    return(fit)
+  }
+  fit_glmer_robust(f_mixed, f_glm, d, label = label)
+}
+
+# Coefficient table, estimates and covariance for any of the fit classes used here
+co_table <- function(fit) if (inherits(fit, "glmmTMB")) summary(fit)$coefficients$cond else summary(fit)$coefficients
+b_vec <- function(fit) if (inherits(fit, "glmmTMB")) glmmTMB::fixef(fit)$cond else if (inherits(fit, "merMod")) lme4::fixef(fit) else coef(fit)
+v_mat <- function(fit) if (inherits(fit, "glmmTMB")) as.matrix(vcov(fit)$cond) else as.matrix(vcov(fit))
+
 # Wald test that several coefficients are equal (e.g. the drought slope in each
 # income group): H0: b_1 = b_2 = ... = b_G, tested with G-1 contrasts b_k - b_1.
 #   b     named vector of fixed-effect estimates
@@ -287,20 +335,22 @@ fit_binary_role_models <- function(cfg, md) {
       est <- tibble(term = sub("^1~", "", rownames(co)), estimate = co[, 1],
                     std.error = co[, 2], p.value = co[, 4])
     } else {
-      # main analysis: lme4::glmer via fit_glmer_robust()
-      fit <- fit_glmer_robust(model_formula("y", md$covariates, mc$time_effect),
-                              model_formula("y", md$covariates, mc$time_effect, FALSE), d,
-                              label = paste("role", r))
+      # main analysis: glmmTMB (fit_mixed), or lme4 through fit_glmer_robust() when
+      # the config says binary_engine: glmer
+      fit_fun <- if (identical(mc$binary_engine, "glmmTMB")) fit_mixed else fit_glmer_robust
+      fit <- fit_fun(model_formula("y", md$covariates, mc$time_effect),
+                     model_formula("y", md$covariates, mc$time_effect, FALSE), d,
+                     label = paste("role", r))
       engine <- attr(fit, "engine")
-      co <- summary(fit)$coefficients
+      co <- co_table(fit)
       # columns of co: Estimate, Std. Error, z value, Pr(>|z|)
       est <- tibble(term = rownames(co), estimate = co[, 1],
                     std.error = co[, 2], p.value = co[, 4], engine = engine)
       if (inherits(fit, "merMod") && lme4::isSingular(fit))
         msg("    role ", r, ": singular fit (random-effect variance ~0)")
       # equality of group-specific slopes (one test per variable)
-      b <- if (inherits(fit, "merMod")) lme4::fixef(fit) else coef(fit)
-      V <- as.matrix(vcov(fit))
+      b <- b_vec(fit)
+      V <- v_mat(fit)
       for (v in names(md$slope_cols)) {
         w <- wald_equal(b, V, md$slope_cols[[v]])
         est <- bind_rows(est, tibble(term = paste0("wald_equal_slopes:", v), estimate = w[["chi2"]],

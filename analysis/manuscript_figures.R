@@ -2,8 +2,16 @@
 # manuscript_figures.R — main-text and SI figures for the manuscript draft
 #
 #   Rscript analysis/manuscript_figures.R
-#   (after run_pipeline.R, analysis/migrant_backbone.R and
-#    analysis/refugee_role_changes.R)
+#   (after run_pipeline.R, analysis/migrant_backbone.R,
+#    analysis/refugee_role_changes.R and analysis/regression_robustness.R)
+#
+# Figs 3 and 4 show 95% percentile intervals from the country cluster bootstrap
+# (robustness/bootstrap.csv, written by regression_robustness.R), because the
+# model-based standard errors of the within-country terms are too small: roles
+# and drivers persist from year to year within a country, which a random
+# intercept does not capture (see the placebo test in that script). A filled
+# symbol means that the bootstrap interval excludes an odds ratio of 1.
+# Fig 5 and the tables of the SI still report model-based intervals.
 #
 # Role codes used in the manuscript (same position = same colour):
 #   refugees (UNHCR):  R1 sender only    R2 two-way        R3 receiver only
@@ -250,15 +258,33 @@ note("Backbone transition matrix: ", paste(sprintf("%d->%d %.2f", stab_mig$trans
 note("Refugee countries always in same role: ", sum(m_ref$share == 1 & m_ref$n > 1), " of ", sum(m_ref$n > 1),
      "; migrants backbone: ", sum(m_mig$share == 1 & m_mig$n > 1), " of ", sum(m_mig$n > 1))
 
+# ---- 95% intervals for Figs 3 and 4: country cluster bootstrap ----------------------
+# One row per model and term, on the odds-ratio scale. `model` is the id used in
+# regression_robustness.R: R1-R3, M1-M2, "<change> (level)" and "<change> (change)".
+boot_file <- out_path(cfg, "robustness", "bootstrap.csv")
+if (!file.exists(boot_file)) stop("Figs 3 and 4 need ", boot_file, ": run analysis/regression_robustness.R first")
+boot <- read_csv(boot_file, show_col_types = FALSE) |>
+  transmute(model, term, boot_or_low = exp(boot_low), boot_or_high = exp(boot_high), n_boot)
+# Replace the model-based interval of each row by the bootstrap interval, and set
+# `sig` (interval excludes 1). The point estimate stays the main model's estimate.
+use_bootstrap <- function(d) {
+  d <- d |> left_join(boot, by = c("model", "term"))
+  if (anyNA(d$boot_or_low)) stop("No bootstrap interval for: ", paste(unique(paste(d$model[is.na(d$boot_or_low)], d$term[is.na(d$boot_or_low)])), collapse = "; "))
+  d |> mutate(or_low = boot_or_low, or_high = boot_or_high, sig = or_low > 1 | or_high < 1)
+}
+
 # ---- Fig 3: drivers of role membership ----------------------------------------------
 # Display names for model terms (only terms listed here are plotted).
 # The tercile terms come from the income_groups / slopes_by_group options in
 # config.yml: <var>_x_g<k> is the slope of <var> among countries in baseline-
 # income tercile k (1 = lowest); income_g2 / income_g3 are tercile main effects.
 TERC <- c(g1 = "low income", g2 = "middle income", g3 = "high income")
-DRV <- c(gdp_pc = "GDP per capita",
+DRV <- c(gdp_pc_within = "GDP per capita: within country", gdp_pc_between = "GDP per capita: between countries",
+         gdp_pc = "GDP per capita",
          income_g2 = "Middle income tercile (vs low)", income_g3 = "High income tercile (vs low)",
          agri_share_base = "Agriculture share of GDP (baseline)",
+         conflict_events_within = "Conflict events: within country", conflict_events_between = "Conflict events: between countries",
+         conflict_deaths_within = "Conflict deaths: within country", conflict_deaths_between = "Conflict deaths: between countries",
          conflict_events = "Conflict events", conflict_deaths = "Conflict deaths",
          drought12_ext = "Drought extent (SPEI-12)", drought12_ext_lag1 = "Drought extent, previous year",
          setNames(paste0("Drought extent: ", TERC), paste0("drought12_ext_x_", names(TERC))),
@@ -281,31 +307,34 @@ GRP <- setNames(ifelse(grepl("^gdp|^income_g|^agri", names(DRV)), "Economy",
                 ifelse(grepl("spei|drought12", names(DRV)), "Climate", "Disasters"))), names(DRV))
 # model results from run_pipeline.R (refugees) and migrant_backbone.R (migrants)
 b_ref <- read_csv(out_path(cfg, "unhcr", "binary_role_models.csv"), show_col_types = FALSE) |>
-  mutate(code = REF_LAB[as.character(role)], net = "Refugees")
+  mutate(code = REF_LAB[as.character(role)], net = "Refugees", model = paste0("R", role))
 b_mig <- read_csv(out_path(cfg, "undesa_backbone", "binary_role_models.csv"), show_col_types = FALSE) |>
-  mutate(code = MIG_LAB[as.character(role)], net = "Migrants")
+  mutate(code = MIG_LAB[as.character(role)], net = "Migrants", model = paste0("M", role))
 # Fig 3 shows every driver except the tercile-specific drought slopes, which
 # have their own figure (Fig 5). Roles with < 20 members are not shown.
 B <- bind_rows(b_ref, b_mig) |> filter(term %in% names(DRV), !grepl("_x_g[0-9]$", term), !unstable, n_events >= 20) |>
+  use_bootstrap() |>
   mutate(driver = factor(DRV[term], rev(DRV)), grp = factor(GRP[term], c("Economy", "Conflict", "Climate", "Disasters")),
          panel = factor(paste0(code, "\n(", n_events, " of ", n_obs, ")"),
                         unique(paste0(code, "\n(", n_events, " of ", n_obs, ")"))),
-         pos = pos_of[as.character(role)], sig = p.value < 0.05)
-# filled, role-coloured points = p < 0.05; open grey points = p >= 0.05
+         pos = pos_of[as.character(role)])
+# filled, role-coloured points = bootstrap interval excludes 1; open grey points = it includes 1
 fig3 <- ggplot(B, aes(odds_ratio, driver)) +
   geom_vline(xintercept = 1, colour = "grey60", linewidth = 0.3) +
   geom_errorbarh(aes(xmin = or_low, xmax = or_high, colour = ifelse(sig, pos, "ns")), height = 0, linewidth = 0.5) +
   geom_point(aes(colour = ifelse(sig, pos, "ns"), shape = sig), size = 1.6, fill = "white") +
   scale_colour_manual(values = c(POS_COL, ns = "grey60"), guide = "none") +
-  scale_shape_manual(values = c(`FALSE` = 21, `TRUE` = 16), labels = c("p ≥ 0.05", "p < 0.05"), name = NULL) +
-  scale_x_log10(breaks = c(0.25, 0.5, 1, 2, 4), labels = c("0.25", "0.5", "1", "2", "4")) +
-  coord_cartesian(xlim = c(0.2, 5)) +
+  scale_shape_manual(values = c(`FALSE` = 21, `TRUE` = 16), labels = c("95% interval includes 1", "95% interval excludes 1"), name = NULL) +
+  # wide range: between-country effects are larger than within-country ones, and
+  # bootstrap intervals are wider than model-based ones; longer intervals are cut at the axis limit
+  scale_x_log10(breaks = c(0.1, 1, 10), labels = c("0.1", "1", "10")) +
+  coord_cartesian(xlim = c(0.02, 30)) +
   facet_grid(grp ~ panel, scales = "free_y", space = "free_y") +
-  labs(x = "Odds ratio per 1 SD (95% CI, log scale)", y = NULL) +
+  labs(x = "Odds ratio per 1 SD (95% country bootstrap interval, log scale)", y = NULL) +
   theme(strip.text.x = element_text(size = 7.5, face = "bold"), strip.text.y = element_text(size = 7.5, angle = 0, hjust = 0),
         panel.spacing.x = unit(3, "mm"), axis.text.y = element_text(size = 7.5), axis.text.x = element_text(size = 7))
 save_png(fig3, "Fig3_driver_odds.png", 7.2, 6.0)
-note("Significant role drivers (p<0.05):\n", paste(capture.output(print(as.data.frame(
+note("Role drivers with a 95% bootstrap interval excluding 1:\n", paste(capture.output(print(as.data.frame(
   B |> filter(sig) |> transmute(code, term, OR = round(odds_ratio, 2), lo = round(or_low, 2), hi = round(or_high, 2), p = signif(p.value, 2))))), collapse = "\n"))
 note("Model sizes: ", paste(unique(sprintf("%s n_obs=%d events=%d", B$code, B$n_obs, B$n_events)), collapse = "; "))
 
@@ -314,7 +343,9 @@ note("Model sizes: ", paste(unique(sprintf("%s n_obs=%d events=%d", B$code, B$n_
 T <- read_csv(out_path(cfg, "unhcr", "role_changes", "transition_models.csv"), show_col_types = FALSE) |>
   # tercile-specific drought slopes are shown in Fig 5, not here
   filter(!unstable, driver %in% names(DRV), !grepl("_x_g[0-9]$", driver)) |>
-  mutate(driver = factor(DRV[driver], rev(DRV)), sig = p.value < 0.05,
+  mutate(model = paste0(change, ifelse(spec == "level in year t", " (level)", " (change)"))) |>
+  use_bootstrap() |>
+  mutate(driver = factor(DRV[driver], rev(DRV)),
          change = factor(paste0(change, "\n(", events, " of ", n, ")"), unique(paste0(change, "\n(", events, " of ", n, ")"))),
          spec = factor(ifelse(spec == "level in year t", "Driver level in year of change", "Change in driver from previous year"),
                        c("Driver level in year of change", "Change in driver from previous year")))
@@ -323,14 +354,14 @@ fig4 <- ggplot(T, aes(odds_ratio, driver)) +
   geom_errorbarh(aes(xmin = or_low, xmax = or_high, colour = sig), height = 0, linewidth = 0.5) +
   geom_point(aes(colour = sig, shape = sig), size = 1.6, fill = "white") +
   scale_colour_manual(values = c(`FALSE` = "grey60", `TRUE` = "#1f3a5f"), guide = "none") +
-  scale_shape_manual(values = c(`FALSE` = 21, `TRUE` = 16), labels = c("p ≥ 0.05", "p < 0.05"), name = NULL) +
-  scale_x_log10(breaks = c(0.25, 0.5, 1, 2, 4), labels = c("0.25", "0.5", "1", "2", "4")) +
-  coord_cartesian(xlim = c(0.2, 5)) + facet_grid(spec ~ change) +
-  labs(x = "Odds ratio per 1 SD (95% CI, log scale)", y = NULL) +
+  scale_shape_manual(values = c(`FALSE` = 21, `TRUE` = 16), labels = c("95% interval includes 1", "95% interval excludes 1"), name = NULL) +
+  scale_x_log10(breaks = c(0.1, 1, 10), labels = c("0.1", "1", "10")) +
+  coord_cartesian(xlim = c(0.02, 60)) + facet_grid(spec ~ change, scales = "free_y", space = "free_y") +
+  labs(x = "Odds ratio per 1 SD (95% country bootstrap interval, log scale)", y = NULL) +
   theme(strip.text = element_text(size = 7.5, face = "bold"), axis.text.y = element_text(size = 7),
         axis.text.x = element_text(size = 7))
-save_png(fig4, "Fig4_role_change_odds.png", 7.2, 7)
-note("Role-change significant (p<0.05):\n", paste(capture.output(print(as.data.frame(T |> filter(sig) |>
+save_png(fig4, "Fig4_role_change_odds.png", 7.2, 7.6)
+note("Role-change drivers with a 95% bootstrap interval excluding 1:\n", paste(capture.output(print(as.data.frame(T |> filter(sig) |>
   transmute(change = gsub("\n.*", "", change), spec, driver, OR = round(odds_ratio, 2), lo = round(or_low, 2),
             hi = round(or_high, 2), p = signif(p.value, 2), engine)))), collapse = "\n"))
 
