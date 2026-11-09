@@ -21,7 +21,8 @@ contains:
 ```
 config.yml                     all settings: datasets, REGE, clustering, drivers, models (main analysis)
 config_*.yml                   variants: original SPEI-01 drivers, Jordan's SPEI-48 file, interim drought,
-                               main specification without conflict controls (see data_prep/SPEI_README.md)
+                               main specification without conflict controls (see data_prep/SPEI_README.md),
+                               and config_blended.yml (one coefficient per driver, the earlier model)
 run_pipeline.R                 runs every step for every dataset listed in config.yml
 validate_against_original.R    compares new role assignments with the original ones
 appendix_figures.R             network diagrams and role-separation plots
@@ -32,7 +33,14 @@ analysis/migrant_volume_robustness.R  migrant groups under other cut-offs, thres
 analysis/migrant_net_roles.R   regular-equivalence roles on net migrant flows (net, backbone, valued)
 analysis/migrant_backbone.R    backbone roles: sensitivity to share and method; driver models
 analysis/refugee_role_changes.R  drivers of year-to-year changes of refugee role
-analysis/manuscript_figures.R  manuscript Figures 1-4 and SI figures (output/manuscript/)
+analysis/regression_robustness.R  robustness of the regressions: sample, specification, data, inference,
+                               placebo, and the country cluster bootstrap used for Figs. 3 and 4
+analysis/regression_robustness_summary.R  combines those checks; figures for the SI
+analysis/regression_bayes.R    Bayesian multilevel versions of the same models (a check)
+analysis/within_between_tests.R  tests whether within-country and between-country coefficients are equal
+analysis/glmmTMB_vs_lme4.R     compares the main models in glmmTMB and lme4
+analysis/regression_evidence.R  one table for each association: all estimates, partial pooling, ranges
+analysis/manuscript_figures.R  manuscript Figures 1-5 and SI figures (output/manuscript/)
 analysis/spei_size_check.R     shows that minimum-over-grid drought indices scale with country size
 R/
   utils.R                      helpers (config, paths, country-name matching, adjusted Rand index)
@@ -40,7 +48,7 @@ R/
   rege.R                       REGE for binary / multi-threshold ties, and valued REGE wrapper
   roles.R                      stacked country-period network, clustering, k diagnostics, role summaries
   drivers.R                    country-year covariate panel and aggregation to each dataset's periods
-  models.R                     mixed-effects logit per role (+ optional multinomial model)
+  models.R                     mixed-effects logit per role, with within/between terms (+ optional multinomial model)
   figures.R                    standard figures
 src/rege_valued.cpp            White's REGGE on flow values (C++ via Rcpp)
 data_ref/                      country reference list and name -> ISO3 crosswalk
@@ -56,8 +64,14 @@ R ≥ 4.2 and these packages:
 ```r
 install.packages(c("dplyr", "tidyr", "readr", "purrr", "stringr", "ggplot2",
                    "forcats", "scales", "yaml", "readxl", "igraph", "matrixStats",
-                   "cluster", "lme4", "mclogit", "nnet", "Rcpp"))
+                   "cluster", "lme4", "mclogit", "nnet", "Rcpp", "glmmTMB",
+                   "patchwork", "ggrepel", "ragg", "sf", "sandwich", "survival", "foreign",
+                   "brglm2", "rstanarm", "loo", "bayesplot"))
 ```
+
+`glmmTMB` fits the main models. `sandwich`, `survival`, `foreign` and `brglm2` are
+used by `analysis/regression_robustness.R`; `rstanarm`, `loo` and `bayesplot` only by
+`analysis/regression_bayes.R`.
 
 `Rcpp` (plus a C++ compiler) is needed only for valued REGE
 (`roles: method: valued`). On macOS run `xcode-select --install` once.
@@ -132,8 +146,27 @@ Rscript data_prep/build_spei_country.R           # -> data/raw/spei_country_year
 Rscript run_pipeline.R [config.yml]
 Rscript analysis/migrant_backbone.R [config.yml]
 Rscript analysis/refugee_role_changes.R [config.yml]
-Rscript analysis/manuscript_figures.R [config.yml]
 ```
+
+To reproduce the regressions and figures of the manuscript, run those three
+analysis steps for `config.yml`, for `config_blended.yml`, and for the alternative
+drought configs (`config_original_spei01.yml`, `config_spei_jordan.yml`,
+`config_drought_interim.yml`, `config_nocontrols_conflict.yml`,
+`config_drought_agriculture.yml`). Then run, in this order:
+
+```sh
+Rscript analysis/regression_robustness.R              # about 100 minutes on 2 cores
+Rscript analysis/regression_robustness_summary.R
+Rscript analysis/regression_bayes.R                   # about 20 minutes
+Rscript analysis/within_between_tests.R
+Rscript analysis/glmmTMB_vs_lme4.R                    # a few minutes
+Rscript analysis/regression_evidence.R
+Rscript analysis/manuscript_figures.R                 # Figs. 3 and 4 need robustness/bootstrap.csv
+```
+
+`regression_robustness.R` takes the environment variables `ROBUST_PARTS` (any of
+`sample spec data inference placebo bootstrap`), `ROBUST_CORES`, `ROBUST_NPERM`
+and `ROBUST_NBOOT`. Random seeds come from `seed` in the config.
 
 Results go to `output/<dataset>/` (not tracked):
 
@@ -190,7 +223,8 @@ loader in `R/drivers.R` that returns `iso3, year, <variables>`, add it to
 | `roles: cluster_on` | `rege_distance` (clustering on 1 − REGE) or `legacy_profiles` (reproduces the original scripts' clustering) |
 | `roles: linkage`, `k`, `k_range` | hierarchical clustering linkage; fixed k or `auto` (maximum average silhouette); range scanned for diagnostics |
 | `drivers: zero_fill`, `per_capita`, `aggregation` | how missing event data, population scaling and period aggregation are handled |
-| `models: covariates`, `log_transform`, `scale`, `time_effect`, `lag_periods`, `binary_engine`, `multinomial` | model specification |
+| `models: covariates`, `log_transform`, `scale`, `time_effect`, `lag_periods`, `binary_engine`, `multinomial` | model specification; `binary_engine` is `glmmTMB` (main analysis), `glmer` or `mblogit` |
+| `models: within_between` | covariates replaced by a within-country term (`<var>_within`, deviation from the country's mean) and a between-country term (`<var>_between`, the country's mean) |
 | `models: baseline` | variables copied as `<var>_base` = the country's value in its first period with data (time-invariant), e.g. `gdp_pc_base` |
 | `models: lags` | variables copied as `<var>_lag1` = value in the previous period (consecutive periods only), e.g. drought in year t-1 for annual refugee data |
 | `models: income_groups` | `{var: gdp_pc_base, n: 3}`: countries are split into baseline-income terciles (cut across countries, not rows); adds tercile dummies `income_g2`, `income_g3` |
@@ -199,20 +233,60 @@ loader in `R/drivers.R` that returns `iso3, year, <variables>`, add it to
 | `drivers: long_files` | extra long-format files (`iso3, year, <variables>`) joined into the driver panel, e.g. `data/raw/wdi_agri_share.csv` |
 | `flows: <dataset>: models:` | per-dataset overrides of any `models:` entry (replaces that entry; used for the annual refugee data) |
 
-Mixed models are fitted by `fit_glmer_robust()` (`R/models.R`): bobyqa, then
-Nelder-Mead, then nloptwrap. A fit is accepted only if lme4 reports no
-convergence problem and all standard errors are between 0.001 and 10;
-otherwise an ordinary logistic regression without the country random
-intercept is used. The `engine` column of every results table says which.
+Mixed models are fitted by `fit_mixed()` (`R/models.R`) in glmmTMB (Laplace
+approximation). A fit that does not converge or has a non-positive-definite
+Hessian goes to `fit_glmer_robust()`: lme4 with bobyqa, then Nelder-Mead, then
+nloptwrap, and ordinary logistic regression without the country random intercept
+if no acceptable mixed fit is found. The `engine` column of every results table
+says which was used. All main models in the manuscript converge in glmmTMB.
 
 Alternative configurations shipped with the repository:
 
 | Config | Purpose |
 |---|---|
-| `config.yml` | main analysis: area-weighted drought indicators, drought slopes by baseline-income tercile |
+| `config.yml` | main analysis: area-weighted drought indicators, drought slopes by baseline-income tercile, within- and between-country terms for GDP per capita and conflict |
+| `config_blended.yml` | as main, with one coefficient per driver (the earlier model, compared in Table S9); writes to `output_blended/` |
 | `config_nocontrols_conflict.yml` | as main, without the conflict variables (total rather than direct drought association) |
 | `config_drought_agriculture.yml` | drought x baseline agriculture share of GDP instead of income terciles |
 | `config_original_spei01.yml`, `config_spei_jordan.yml`, `config_drought_interim.yml` | earlier drought measures, for comparison (Table S1) |
+
+## Regression model and uncertainty
+
+The role and role-change models are mixed-effects logistic regressions with a
+country random intercept, fitted by maximum likelihood. GDP per capita, conflict
+events and conflict deaths are each separated into a between-country term (the
+country's mean) and a within-country term (the deviation from it), following
+Bafumi and Gelman (2006). `analysis/within_between_tests.R` tests whether the two
+coefficients are equal, which a model with one coefficient per driver assumes.
+
+The confidence intervals in `binary_role_models.csv` and `transition_models.csv`
+(`or_low`, `or_high`) are model-based. Given its intercept, the model treats a
+country's successive periods as independent, but roles and drivers persist. Under
+the placebo test that gives each country another country's full driver history,
+within-country terms of the refugee role models exceed |t| = 1.96 in about 20% of
+runs instead of 5%. Figs. 3 and 4 and the Results therefore use 95% percentile
+intervals from a country cluster bootstrap (`output/robustness/bootstrap.csv`:
+whole countries resampled with replacement, 500 samples, non-converged refits
+discarded). Fig. 5 and SI Tables S1-S4 remain model-based. For rare EM-DAT disaster
+terms, a few events drive the estimate and the percentile interval can be too
+narrow or lopsided, so those terms should be read together with the model-based
+result and the partially pooled estimate.
+
+Outputs in `output/robustness/` (not tracked):
+
+| File | Content |
+|---|---|
+| `baseline.csv` | main-model estimates that the checks are compared with |
+| `sample_refits.csv`, `spec_refits.csv`, `data_refits.csv` | every refit: subsamples, specifications, alternative data |
+| `inference.csv` | pooled-logit standard errors: clustered, two-way, Conley |
+| `bootstrap.csv` | country cluster bootstrap of the mixed models |
+| `placebo_draws.csv`, `placebo_summary.csv` | placebo runs and randomization p-values |
+| `summary_table.csv` | one row per model and driver, all checks combined |
+| `within_between_tests.csv`, `within_between_estimates.csv` | tests of equal within and between coefficients |
+| `glmmTMB_vs_lme4.csv`, `lme4_restart_check.csv` | comparison of the two fitting programs |
+| `bayes/` | Bayesian coefficients, convergence diagnostics, posterior predictive checks |
+| `partial_pooling.csv`, `family_tau.csv` | partial pooling by family of drivers |
+| `evidence_table.csv`, `Fig_evidence.png` | all estimates for each association (Table S9, Fig. S12) |
 
 ## Methodological notes
 

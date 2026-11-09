@@ -30,8 +30,13 @@
 #   linear time trend in decades (period_c); annual fixed effects would use
 #   up too many degrees of freedom with ~70 events
 #   u_c ~ N(0, s_u^2) country random intercept
-# The level spec uses the same covariates as the refugee role models,
-# including drought slopes by income tercile (Wald test of equal slopes).
+# The level spec uses the same covariates as the refugee role models, including
+# the within- and between-country terms for GDP per capita and conflict and the
+# drought slopes by income tercile (Wald test of equal slopes). The change spec
+# uses the year-on-year change of each driver, which is already within-country.
+#
+# or_low and or_high in transition_models.csv are model-based. Fig. 4 and the
+# Results use the country cluster bootstrap (regression_robustness.R).
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -58,6 +63,8 @@ slope_groups <- if (file.exists(slope_file)) split(read_csv(slope_file, show_col
 # Base drivers only (no lags, products or group dummies) for the change-from-
 # previous-year specification: a year-on-year difference of a product is not meaningful.
 covs <- covs_level[!grepl("_lag1|_x_|^income_g|_base$", covs_level)]
+# a year-on-year change uses the driver itself, not its within/between parts
+covs <- unique(sub("_(within|between)$", "", covs))
 # a drought variable with tercile-specific slopes is not itself in covs_level
 # (its slope columns replace it); add it back so its year-on-year change enters
 covs <- unique(c(covs, setdiff(names(slope_groups), grep("_lag1$", names(slope_groups), value = TRUE))))
@@ -98,15 +105,17 @@ fit_one <- function(dd, vars, slopes = list()) {
   vars <- vars[vapply(vars, \(v) sd(dd[[v]], na.rm = TRUE) > 0, logical(1))]
   f <- as.formula(paste("y ~", paste(c(vars, "period_c"), collapse = " + "), "+ (1 | iso3)"))
   f_glm <- as.formula(paste("y ~", paste(c(vars, "period_c"), collapse = " + ")))
-  # same robust fitting as the role models (R/models.R): several optimizers,
-  # then ordinary logistic regression if no acceptable mixed fit is found
-  fit <- fit_glmer_robust(f, f_glm, dd, label = "role change")
+  # same fitting rule as the role models (R/models.R): glmmTMB when the config says
+  # so; otherwise, or if it fails, lme4 with several optimizers, then ordinary
+  # logistic regression if no acceptable mixed fit is found
+  fit_fun <- if (identical(cfg$models$binary_engine, "glmmTMB")) fit_mixed else fit_glmer_robust
+  fit <- fit_fun(f, f_glm, dd, label = "role change")
   engine <- attr(fit, "engine")
-  co <- summary(fit)$coefficients
+  co <- co_table(fit)
   out <- tibble(term = rownames(co), estimate = co[, 1], std.error = co[, 2], p.value = co[, 4], engine = engine)
   # equality of the group-specific drought slopes (Wald chi-square; df in std.error)
-  b <- if (inherits(fit, "merMod")) lme4::fixef(fit) else coef(fit)
-  V <- as.matrix(vcov(fit))
+  b <- b_vec(fit)
+  V <- v_mat(fit)
   for (v in names(slopes)) {
     w <- wald_equal(b, V, slopes[[v]])
     out <- bind_rows(out, tibble(term = paste0("wald_equal_slopes:", v), estimate = w[["chi2"]],

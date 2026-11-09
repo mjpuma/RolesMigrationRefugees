@@ -226,5 +226,8 @@ models:
   scale: true                 # z-score covariates (odds ratio per 1 SD)
   time_effect: factor         # none | linear | factor (period fixed effects)
   lag_periods: 0              # 1 = drivers from the previous period
-  binary_engine: glmer        # glmer (lme4, Laplace) | mblogit (mclogit, PQL; original)
+  binary_engine: glmmTMB      # glmmTMB (Laplace; falls back to glmer) | glmer (lme4, Laplace) | mblogit (mclogit, PQL; original)
+  # GDP per capita and conflict are split into a within-country and a between-country
+  # component (Bafumi and Gelman 2006); see R/models.R
+  within_between: [gdp_pc, conflict_events, conflict_deaths]
   multinomial: true           # also fit one baseline-category logit over all roles
