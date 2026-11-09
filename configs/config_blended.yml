@@ -2,7 +2,7 @@
 # MAIN CONFIGURATION (since 7 Nov 2026): drought from area-weighted SPEI-12 / SPEI-48,
 # matched to each dataset's timescale, with drought slopes by income tercile (aspirations/capabilities).
 # Before the first run:  Rscript data_prep/build_spei_country.R   (see data_prep/SPEI_README.md)
-# Alternatives: config_original_spei01.yml, config_spei_jordan.yml, config_drought_interim.yml,
+# Alternatives (in configs/): config_original_spei01.yml, config_spei_jordan.yml, config_drought_interim.yml,
 #               config_nocontrols_conflict.yml (total drought effect, no conflict controls),
 #               config_drought_agriculture.yml (drought x agricultural share of GDP)
 # =============================================================================
