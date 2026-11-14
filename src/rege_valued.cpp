@@ -67,8 +67,10 @@ static inline void side(int i, int j,
   }
 }
 
+//   keep  iterations at which to return a copy of the similarity matrix (optional)
 // [[Rcpp::export]]
-List rege_valued_cpp(NumericMatrix X, int iterations, bool no_self_match) {
+List rege_valued_cpp(NumericMatrix X, int iterations, bool no_self_match,
+                     IntegerVector keep = IntegerVector::create()) {
   int n = X.nrow();
   // Pre-compute, for every node, its partners and the tie values in both
   // directions, so the inner loops only visit actual ties (the network is sparse).
@@ -87,6 +89,7 @@ List rege_valued_cpp(NumericMatrix X, int iterations, bool no_self_match) {
   NumericMatrix E(n, n);
   std::fill(E.begin(), E.end(), 1.0);
   NumericVector change(iterations);
+  List snaps; CharacterVector snap_names;
   for (int it = 0; it < iterations; ++it) {
     NumericMatrix En(n, n);
     double maxch = 0.0;
@@ -105,8 +108,10 @@ List rege_valued_cpp(NumericMatrix X, int iterations, bool no_self_match) {
     }
     E = En;                                // all pairs are updated from the previous E
     change[it] = maxch;                    // largest change this iteration (convergence check)
+    for (int q = 0; q < keep.size(); ++q) if (keep[q] == it + 1) { snaps.push_back(clone(E)); snap_names.push_back(std::to_string(it + 1)); }
     Rcpp::Rcout << "    valued REGE iteration " << it + 1
                 << ": max change " << maxch << std::endl;
   }
-  return List::create(_["similarity"] = E, _["change"] = change);
+  snaps.names() = snap_names;
+  return List::create(_["similarity"] = E, _["change"] = change, _["snapshots"] = snaps);
 }

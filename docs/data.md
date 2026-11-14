@@ -30,7 +30,8 @@ using the file names in `config.yml`:
 | File (in `data/raw/`) | Source |
 |---|---|
 | `bilat_mig.csv` | Abel & Cohen (2022) bilateral migration flow estimates, figshare [doi:10.6084/m9.figshare.c.5800838](https://doi.org/10.6084/m9.figshare.c.5800838) (column `da_pb_closed`) |
-| `UNHCR_Flow_Data_REF.csv` | UNHCR Forced Displacement Flow Dataset, refugee arrivals (obtained from UNHCR; columns `refflows.1990` … `refflows.2020`) |
+| `unhcr_flows_latest.csv` | UNHCR forced displacement flow data, current release; written by `data_prep/get_unhcr_flows.R` (see below). Default refugee data: column `refugees`, 1990–2020 |
+| `legacy/UNHCR_Flow_Data_REF.csv` | Older UNHCR extract of refugee arrivals used in the first drafts (dataset `unhcr_legacy`); all of its flows are in the current release unchanged |
 | `WPP2022_Demographic_Indicators_Medium.csv` | UN World Population Prospects 2022, [population.un.org/wpp](https://population.un.org/wpp/) |
 | `GDP_Global_1990_2021.csv` | World Bank WDI, GDP per capita (current US$), `NY.GDP.PCAP.CD`, DataBank CSV export |
 | `spei01-annual-{min,max,mean}{,-cv}.csv` | SPEIbase v2.9 (Beguería et al.), SPEI-01 aggregated to country-year annual min / max / mean and their coefficients of variation |
@@ -43,38 +44,39 @@ using the file names in `config.yml`:
 | `wdi_agri_share.csv` | World Bank WDI, agriculture, forestry and fishing value added (% of GDP), `NV.AGR.TOTL.ZS`, reshaped to `iso3, year, agri_share` (only for `configs/config_drought_agriculture.yml`) |
 | `unhcr_flows_latest.csv` | Current UNHCR forced-displacement flow data, written by `data_prep/get_unhcr_flows.R` (see below) |
 
-### Current UNHCR flow data
+### UNHCR flow data
 
-`UNHCR_Flow_Data_REF.csv` is an older extract (refugee arrivals, 1990–2020).
-To use UNHCR's current release, run once from the repository root:
+The refugee data come from UNHCR's current release. Run once from the repository root:
 
 ```sh
-Rscript data_prep/get_unhcr_flows.R
+Rscript data_prep/get_unhcr_flows.R           # installs UNHCR's `refugees` R package
+Rscript data_prep/get_unhcr_flows.R github    # or: reads the data files from UNHCR's GitHub repository
 ```
 
-This installs or updates UNHCR's `refugees` R package (from UNHCR's
-R-universe, which is newer than CRAN), takes its `flows` table (one row per
-origin × asylum country × year), drops rows without a valid ISO3 code on both
-sides (unknown origin, stateless), and writes `data/raw/unhcr_flows_latest.csv`
-plus a `_README.txt` recording the package version, download date and the
-years covered by each column:
+This takes the package's `flows` table (one row per origin × asylum country × year),
+adds resettlement and returns from its `solutions` table, drops rows without a
+country code on both sides (unknown origin, stateless, Tibetan), and writes
+`data/raw/unhcr_flows_latest.csv` plus a `_README.txt` recording the package
+version, download date and the years covered by each column:
 
 | Column | New arrivals / applications |
 |---|---|
-| `refugees` | refugee arrivals (group-recognised and temporary protection; what the original analysis used) |
-| `asylum_seekers` | new individual asylum applications (broad coverage from 2000) |
+| `refugees` | refugee arrivals: group (prima facie) recognitions and temporary protection |
+| `asylum_seekers` | new individual asylum applications (20–37 reporting countries before 2000, 137 from 2000) |
+| `refugee_like` | people in refugee-like situations (not included in `refugees`) |
 | `oip` | other people in need of international protection (from 2018) |
+| `resettlement` | refugees resettled to a third country (not used by default) |
 | `returned_refugees` | refugee returns to the country of origin (not used by default) |
 
-Two datasets in `config.yml` read this file:
+`refugees` and `asylum_seekers` do not double count: the first is group recognition,
+the second individual applications. High-income asylum countries record almost
+no `refugees`; their inflows are asylum applications.
 
-- `unhcr_latest`: refugee arrivals only, all years in the release (same definition as `unhcr`, newer data).
-- `unhcr_displacement`: refugee arrivals + asylum applications + OIP, summed, from 2000.
+Three datasets in `config.yml` read UNHCR data:
 
-Add them to `run:` to include them. The driver files listed above end in
-2020–2021, so later flow years have missing drivers and are left out of the
-models (the run prints which drivers end early) until those files are
-updated. Roles are still computed for every year.
+- `unhcr` (default): refugee arrivals, 1990–2020.
+- `unhcr_displacement`: refugee arrivals + refugee-like + asylum applications + OIP, 2000–2020. Add it to `run:` to include it.
+- `unhcr_legacy`: the older extract `data/raw/legacy/UNHCR_Flow_Data_REF.csv` used in the first drafts. All 2,444 of its flows are in the current release with the same values, and the roles and models are identical.
 
 `data_ref/country_list.csv` is the Abel & Cohen country reference list.
 `data_ref/country_name_crosswalk.csv` maps country-name spellings used by the
