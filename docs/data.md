@@ -42,7 +42,6 @@ using the file names in `config.yml`:
 | `new_gdp_percapita_rows.csv` | GDP per capita for five territories missing from WDI (Anguilla, British Virgin Islands, Cook Islands, Montserrat, Palestine); fills gaps only |
 | `spei_country_year.csv` | written by `data_prep/build_spei_country.R` (see below) |
 | `wdi_agri_share.csv` | World Bank WDI, agriculture, forestry and fishing value added (% of GDP), `NV.AGR.TOTL.ZS`, reshaped to `iso3, year, agri_share` (only for `configs/config_drought_agriculture.yml`) |
-| `unhcr_flows_latest.csv` | Current UNHCR forced-displacement flow data, written by `data_prep/get_unhcr_flows.R` (see below) |
 
 ### UNHCR flow data
 

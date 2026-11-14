@@ -12,7 +12,7 @@ flows:
   my_new_flows:
     label: "Describe the data"
     file: data/raw/my_flows.csv
-    format: long              # or wide (one column per year; see the unhcr entry)
+    format: long              # or wide (one column per year; see the unhcr_legacy entry)
     origin: origin_iso3       # column names in your file (ISO3 codes)
     destination: dest_iso3
     period: year
