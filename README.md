@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/migration_network_roles_logo.webp" width="360" alt="Migration and Refugee Network Roles research software logo"></p>
+
 # RolesMigrationRefugees
 
 Code for a manuscript in preparation by Zurek-Ost, Hood, Puma, Muneepeerakul,
